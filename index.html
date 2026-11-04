@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f5f7fa">
-  <meta name="description" content="Názorně a krok za krokem: prozkoumejte spolupráci hardwaru při spuštění kalkulačky a přehrávání videa.">
+  <meta name="description" content="Názorně a krok za krokem: spolupráce hardwaru při zapnutí počítače, spuštění kalkulačky, přehrávání videa a ukládání souboru.">
   <title>Uvnitř počítače · Jak spolupracuje hardware</title>
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
@@ -15,30 +15,35 @@
 </head>
 <body>
   <main class="workspace">
-    <aside class="sidebar" aria-label="Nastavení průvodce">
-      <fieldset class="scenario-picker"><legend><span class="section-number">01</span> Vyberte činnost</legend><div id="scenario-options"></div></fieldset>
-      <fieldset class="detail-picker"><legend><span class="section-number">02</span> Úroveň podrobnosti</legend>
-        <div class="segmented"><label><input type="radio" name="detail" value="basic" checked><span>Základní</span></label><label><input type="radio" name="detail" value="detailed"><span>Podrobné</span></label></div>
-        <p class="setting-hint" id="detail-hint">Hlavní součásti a cesta dat.</p>
-      </fieldset>
-      <label class="explanation-toggle"><input type="checkbox" id="show-explanation" checked><span class="switch" aria-hidden="true"></span><span>Zobrazit vysvětlení</span></label>
-      <div class="model-note"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v1"/></svg><p><strong>Jeden názorný model</strong>Integrovaná grafika využívá společnou RAM. Skutečné počítače se mohou lišit.</p></div>
-    </aside>
+    <section class="settings" aria-label="Nastavení průvodce">
+      <fieldset class="scenario-picker"><legend>Vyberte činnost</legend><div id="scenario-options"></div></fieldset>
+      <div class="detail-picker">
+        <label class="setting-toggle"><input type="checkbox" role="switch" id="show-cpu-detail" aria-controls="cpu-detail"><span class="switch" aria-hidden="true"></span><span>Cache a registry</span></label>
+      </div>
+      <div class="graphics-picker">
+        <label class="setting-toggle" title="Vypnuto: integrovaná grafika. Zapnuto: dedikovaná grafika."><input type="checkbox" role="switch" id="dedicated-graphics" aria-label="Dedikovaná grafika" aria-controls="gpu-card node-vram"><span class="switch" aria-hidden="true"></span><span>Dedikovaná grafika</span></label>
+      </div>
+    </section>
 
     <section class="lab" aria-labelledby="scenario-title">
       <div class="lab-heading">
         <h1 id="scenario-title">Spuštění kalkulačky</h1>
         <div class="playback-controls" role="group" aria-label="Ovládání animace">
           <button class="play-button" id="play" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg><span>Spustit</span></button>
-          <button class="control-button" id="next" type="button" title="O jeden krok vpřed"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 5 10 7-10 7ZM19 5v14"/></svg><span>Další krok</span></button>
+          <button class="control-button" id="next" type="button" title="Přehrát jeden krok a zastavit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 5 10 7-10 7ZM19 5v14"/></svg><span>Další krok</span></button>
           <button class="control-button reset-button" id="reset" type="button" title="Vrátit scénář na začátek" aria-label="Vrátit scénář na začátek"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10a8 8 0 1 1 1 8M4 4v6h6"/></svg><span>Od začátku</span></button>
         </div>
       </div>
       <p class="diagram-scroll-hint">↔ Schéma můžete posunout do stran.</p>
       <div class="diagram-area" id="diagram-container"></div>
-      <div class="step-area" id="step-area">
-        <div class="step-line"><span class="step-label" id="step-count">VÝCHOZÍ STAV</span><span class="step-track" id="step-track" aria-hidden="true"></span></div>
-        <div class="explanation" id="explanation" aria-live="polite" aria-atomic="true"><h3 id="step-title"></h3><p id="step-description"></p></div>
+      <div class="step-area explanation-hidden" id="step-area">
+        <div class="visualization-toggles">
+          <label class="explanation-toggle"><input type="checkbox" id="show-explanation" aria-controls="explanation"><span class="switch" aria-hidden="true"></span><span>Zobrazit vysvětlení</span></label>
+        </div>
+        <div class="step-content" id="explanation" hidden>
+          <div class="step-line"><span class="step-label" id="step-count">VÝCHOZÍ STAV</span><span class="step-track" id="step-track" aria-hidden="true"></span></div>
+          <div class="explanation" aria-live="polite" aria-atomic="true"><h3 id="step-title"></h3><p id="step-description"></p></div>
+        </div>
       </div>
     </section>
   </main>

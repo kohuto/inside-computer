@@ -1,5 +1,6 @@
 /* Každý scénář je jen obsah a stav schématu. O čas i vykreslení se starají jiné soubory.
    effects se dědí mezi kroky, active/flows platí pouze pro aktuální krok.
+   memoryWrites mění zobrazený obsah paměti až po dokončení přenosu.
    Podrobná varianta rozvádí tentýž příběh, který základní režim místy shrnuje. */
 window.HWLab = window.HWLab || {};
 (function (Lab) {
@@ -8,6 +9,11 @@ window.HWLab = window.HWLab || {};
   const flow = (route, type, label, reverse = false) => ({ route, type, label, ...(reverse ? { reverse: true } : {}) });
   const step = (id, title, description, active, flows = [], effects = {}, duration = 2900) =>
     ({ id, title, description, active, flows, effects, duration });
+  const item = (id, label) => ({ id, label });
+  const ramWrite = (...items) => ({ ram: items });
+  const withMemory = (steps, writes) => steps.map(s => writes[s.id] ? { ...s, memoryWrites: writes[s.id] } : s);
+  const focus = (ids,label) => ({ids,...(label ? {label} : {})});
+  const withRamFocus = (steps,focuses) => steps.map(s => focuses[s.id] ? {...s,ramFocus:focuses[s.id]} : s);
 
   const click = () => step('click', 'Kliknutí je vstup pro počítač',
     'Myš odešle informaci o kliknutí. Procesor zpracuje instrukce, které na tento vstup navazují.',
@@ -236,23 +242,255 @@ window.HWLab = window.HWLab || {};
         playing, outputs, { screen: 'video', playback: true, soundPlaying: true, playbackFrom: 0, playbackTo: 3, cpuWork: false }, 10000), [
         { at: 0 },
         { at: .18, active: [...playing, 'server', 'network'], flows: [...outputs, flow('serverNetwork', 'data', 'Video a zvuk')] },
-        { at: .36, active: [...playing, 'network', 'ram'], flows: [...outputs, flow('networkRam', 'data', 'Video a zvuk')], effects: { buffer: 3 } },
+        { at: .36, active: [...playing, 'network', 'ram'], flows: [...outputs, flow('networkRam', 'data', 'Video a zvuk')], effects: { buffer: 3 },
+          memoryWrites: ramWrite(item('received', 'Video a zvuk (části 1–2)')) },
         { at: .54 },
         { at: .66, active: [...playing, 'server', 'network'], flows: [...outputs, flow('serverNetwork', 'data', 'Video a zvuk')] },
-        { at: .82, active: [...playing, 'network', 'ram'], flows: [...outputs, flow('networkRam', 'data', 'Video a zvuk')], effects: { buffer: 4 } },
+        { at: .82, active: [...playing, 'network', 'ram'], flows: [...outputs, flow('networkRam', 'data', 'Video a zvuk')], effects: { buffer: 4 },
+          memoryWrites: ramWrite(item('received', 'Video a zvuk (části 1–3)')) },
         { at: .96 }
       ])
     ];
   };
 
+  // Editor i rozepsaný dokument už jsou v RAM. Po přenosu čekají data v SSD
+  // na trvalý zápis; hotový soubor přibude až po dokončení devátého kroku.
+  // Cache a registry rozvádíme uvnitř stejných kroků, bez prodloužení příběhu.
+  const saveFile = detailed => withMemory([
+    step('save-click', 'Kliknutí na Uložit',
+      'Textový editor je otevřený a dokument je rozepsaný v RAM. Myš odešle CPU informaci o kliknutí na Uložit.',
+      ['mouse','cpu'], [flow('mouseCpu','control','Kliknutí na Uložit')], {clicked:true}),
+    step('save-read', 'CPU načte instrukce a data',
+      detailed ? 'CPU získá potřebné instrukce editoru a vybraná pracovní data z RAM do cache. Často používané údaje mohou být v cache už připravené.'
+        : 'CPU načte potřebné instrukce editoru a pracovní data pro uložení dokumentu. Při běhu programu zajišťuje také činnost systému a ovladače.',
+      ['ram','cpu',...(detailed ? ['cache'] : [])], [flow(detailed ? 'ramCache' : 'ramCpu','data','Instrukce a data')], {cpuWork:true}, 3200),
+    {...step('save-prepare', 'CPU připraví soubor k uložení',
+      'CPU připraví obsah dokumentu ve formátu textového souboru poznamky.txt.' + (detailed
+        ? ' Cache uchovává potřebné instrukce a data, registry právě používané adresy a jednotlivé hodnoty.'
+        : ' Připravené bajty souboru následně zapíše do RAM.'),
+      ['cpu',...(detailed ? ['cache','registers'] : [])], [], {}, 3600),
+      highlights:[highlight(detailed ? 'cpuRam' : 'cpu','Příprava souboru')]},
+    step('save-data', 'CPU zapíše připravená data do RAM',
+      'CPU uloží do RAM připravené bajty souboru poznamky.txt. Rozepsaný dokument zůstává dostupný editoru.',
+      ['cpu','ram'], [flow('ramCpu','data','Data souboru',true)], {}, 3200),
+    step('save-request', 'CPU připraví požadavek na zápis',
+      'CPU zapíše do RAM požadavek určující umístění zdrojových dat, jejich délku a cílové bloky SSD. Název souboru a jeho umístění řeší systém souborů.',
+      ['cpu','ram'], [flow('ramCpu','control','Požadavek na zápis',true)]),
+    step('save-notify', 'CPU oznámí SSD novou práci',
+      'CPU upozorní řadič SSD na připravenou práci v RAM. Toto oznámení nepřenáší obsah souboru.',
+      ['cpu','ssd'], [flow('cpuSsd','control','Oznámení nové práce')]),
+    step('save-request-read', 'SSD načte požadavek z RAM',
+      'Řadič SSD si z RAM načte připravený příkaz k zápisu. Zjistí, odkud má data převzít a kam je uložit.',
+      ['ram','ssd'], [flow('ssdRam','control','Požadavek na zápis',true)]),
+    step('save-transfer', 'Data souboru se přenesou do SSD',
+      'Řadič SSD načte data souboru z RAM pomocí DMA. CPU nemusí jednotlivé bajty kopírovat. Přijatá data ještě čekají na trvalý zápis do flash.',
+      ['ram','ssd'], [flow('ssdRam','data','Data souboru',true)], {}, 3600),
+    {...step('save-flash', 'SSD zapisuje data do flash',
+      'SSD dokončí zápis do trvalé paměti. Po skončení tohoto kroku se v SSD objeví poznamky.txt a jeho kopie zůstane v RAM. Ukázka zde končí dokončeným trvalým zápisem.',
+      ['ssd'], [], {cpuWork:false}, 4000), highlights:[highlight('ssd','Zápis do flash')]}
+  ], {
+    'save-data':ramWrite(item('file','poznamky.txt')),
+    'save-request':ramWrite(item('request','Požadavek na zápis')),
+    'save-transfer':{ssd:[item('file','Čeká na zápis')]},
+    'save-flash':{ssd:[item('file','poznamky.txt')]}
+  });
+
+  // Studený start: první instrukce pocházejí z flash, RAM se připraví až poté.
+  // Zavaděč a potřebné části OS načítáme odděleně. Cache nemění počet kroků.
+  const boot = (detailed,graphics) => {
+    const cpuActive = ['cpu',...(detailed ? ['cache','registers'] : [])];
+    const readRoute = detailed ? 'ramCache' : 'ramCpu';
+    const work = (id,title,description,label,effects={}) => ({
+      ...step(id,title,description,cpuActive,[],effects,3400),
+      highlights:[highlight(detailed ? 'cpuRam' : 'cpu',label)]
+    });
+    const steps = withMemory([
+      {...step('power-on','Stisk vypínače zapne hlavní napájení',
+        'Vypínač dá pokyn řídicím obvodům základní desky, které zapnou hlavní výstupy zdroje. Po ustálení napětí může začít start CPU. Pohotovostní napájení je přítomné už před stiskem.',
+        ['powerbutton','psu'],[],{powered:true},3000),highlights:[highlight('power','Zapnutí napájení')]},
+      {...step('firmware-read','CPU začne číst kód firmwaru UEFI',
+        'Po uvolnění resetu CPU čte první instrukce z flash paměti s firmwarem UEFI. RAM ještě není připravená; úvodní kód se proto nemusí nejprve načíst do RAM.',
+        ['uefi','cpu'],[flow('uefiCpu','control','Kód firmwaru')],{cpuWork:true},3300),
+        completionEffects:{cpuSoftware:'UEFI'}},
+      {...work('hardware-init','Firmware připraví hardware',
+        'CPU vykonává firmware, provede základní kontroly a připraví paměťový řadič i RAM. Následně zpřístupní zařízení potřebná pro start, včetně SSD a grafiky. Nejde o test každého bajtu paměti.',
+        'Inicializace hardwaru'),active:[...cpuActive,'ram','ssd','gpu'],completionEffects:{ramReady:true}},
+      work('boot-select','Firmware vybere zavaděč systému',
+        'CPU stále vykonává firmware UEFI. Podle uloženého nastavení vybere spouštěcí položku a zavaděč na SSD. V této ukázce se systém spouští z místního SSD.',
+        'Výběr zavaděče'),
+      step('loader-request','CPU připraví požadavek na zavaděč',
+        'RAM je už připravená. CPU v ní vytvoří požadavek na načtení zavaděče systému z SSD. Používáme stejný zjednodušený model čtení jako v ostatních scénářích.',
+        ['cpu','ram'],[flow('ramCpu','control','Požadavek na načtení',true)]),
+      step('loader-notify','CPU oznámí SSD připravený požadavek',
+        'CPU upozorní řadič SSD na novou práci. Převzetí příkazu a oznámení dokončení pro přehlednost slučujeme s následujícím přenosem zavaděče.',
+        ['cpu','ssd'],[flow('cpuSsd','control','Oznámení nové práce')]),
+      step('loader-load','Zavaděč se načte z SSD do RAM',
+        'Řadič SSD přenese kód a data zavaděče do RAM. Původní kopie zůstává na SSD. Zavaděč je malý program, který připraví spuštění operačního systému.',
+        ['ssd','ram'],[flow('ssdRam','data','Zavaděč systému')],{ramLoaded:true},3500),
+      {...step('loader-read','CPU načte instrukce zavaděče',
+        'CPU začne načítat instrukce a data zavaděče z RAM.' + (detailed ? ' Potřebné údaje se dostávají do cache; registry drží jednotlivé právě používané hodnoty.' : ''),
+        ['ram',...cpuActive],[flow(readRoute,'control','Instrukce zavaděče')],{},3200),completionEffects:{cpuSoftware:'Zavaděč'}},
+      work('loader-run','Zavaděč připraví spuštění systému',
+        'CPU nyní vykonává zavaděč. Ten vybere potřebné součásti operačního systému a připraví jejich načtení do RAM.',
+        'Spuštění zavaděče'),
+      step('system-request','CPU připraví požadavek na části systému',
+        'CPU při vykonávání zavaděče připraví v RAM požadavek na potřebné části systému uložené na SSD.',
+        ['cpu','ram'],[flow('ramCpu','control','Požadavek na načtení',true)]),
+      step('system-notify','CPU oznámí SSD další práci',
+        'CPU upozorní SSD na připravené čtení částí operačního systému. Oznámení nepřenáší samotný kód systému.',
+        ['cpu','ssd'],[flow('cpuSsd','control','Oznámení nové práce')]),
+      step('system-load','Potřebné části systému se načtou do RAM',
+        'Z SSD se postupně načítá jádro, potřebné ovladače a další soubory pro start a přihlašovací prostředí. Tento krok shrnuje více čtení; celý systém se do RAM najednou nekopíruje.',
+        ['ssd','ram'],[flow('ssdRam','data','Části systému')],{},4000),
+      {...step('system-read','CPU převezme instrukce a data systému',
+        'Zavaděč předá řízení jádru systému. CPU načítá jeho instrukce a potřebná data z RAM.' + (detailed ? ' Čtení zprostředkovává cache; registry uchovávají právě používané hodnoty a adresy.' : ''),
+        ['ram',...cpuActive],[flow(readRoute,'control','Instrukce a data')],{},3200),completionEffects:{cpuSoftware:'Operační systém'}},
+      work('system-start','Operační systém zahájí provoz',
+        'CPU vykonává systém, který inicializuje ovladače, spouští služby a připravuje přihlašovací prostředí. Další soubory se v reálném počítači načítají průběžně; zde jsme jejich čtení shrnuli v předchozím kroku.',
+        'Spouštění systému'),
+      step('boot-image','CPU připraví obraz přihlášení v RAM',
+        'CPU při běhu systému a grafického ovladače zapíše do RAM podklady a příkazy pro přihlašovací obrazovku.',
+        ['cpu','ram'],[flow('ramCpu','data','Podklady a příkazy',true)]),
+      step('graphics-request','CPU oznámí grafické části novou práci',
+        'CPU oznámí grafické části připravené podklady a příkazy v RAM. Samotná obrazová data se tímto oznámením nepřenášejí.',
+        ['cpu','gpu'],[flow('cpuGpu','control','Oznámení nové práce')]),
+      step('draw','Grafická část převezme podklady a příkazy',
+        'Integrovaná grafika načte ze společné RAM podklady a příkazy pro přihlašovací obrazovku a připraví její obraz. Pro jednoduchost nezobrazujeme dřívější logo firmwaru.',
+        ['ram','gpu'],[flow('ramGpu','data','Podklady a příkazy')],{},3500),
+      {...step('ready','Počítač je připravený k přihlášení',
+        'Grafická část odešle monitoru obrazový signál. Po dokončení přenosu se zobrazí přihlašovací obrazovka; operační systém již běží v CPU.',
+        ['gpu','monitor'],[flow('gpuMonitor','output','Obrazový signál')],{},3000),completionEffects:{screen:'login',cpuWork:false}}
+    ],{
+      'loader-request':ramWrite(item('request','Načíst zavaděč')),
+      'loader-load':ramWrite(item('loader','Zavaděč systému')),
+      'system-request':ramWrite(item('request','Načíst systém')),
+      'system-load':ramWrite(item('system','Části systému')),
+      'boot-image':ramWrite(item('image','Podklady pro obraz'),item('commands','Příkazy pro grafiku'))
+    });
+    return withRamFocus(withGraphics(steps,false,graphics,false,{
+      frameLabel:'Obraz přihlášení', imageDescription:'přihlašovací obrazovky',
+      preparationScreen:null, outputDescription:'po dokončení přenosu se objeví přihlašovací obrazovka.'
+    }),{
+      'boot-image':focus(['image','commands'],'Podklady a příkazy'),
+      draw:focus(['image','commands'],'Podklady a příkazy'),
+      'graphics-commands-read':focus(['commands']),
+      'graphics-upload':focus(['image'])
+    });
+  };
+
+  // Stabilní id položek dovoluje doplnit nebo aktualizovat obsah. Čtení nic
+  // nemaže a přenos kódu ze SSD nemění jeho dlouhodobě uloženou kopii.
+  const calculatorMemory = detailed => ({
+    'read-request-write': ramWrite(item('request', 'Požadavek na načtení')),
+    load: ramWrite(item('program', 'Kód a data kalkulačky')),
+    'write-data': ramWrite(item('image', 'Podklady pro obraz'),
+      ...(!detailed ? [item('commands', 'Příkazy pro grafiku')] : [])),
+    'graphics-commands-write': ramWrite(item('commands', 'Příkazy pro grafiku'))
+  });
+  const youtubeMemory = detailed => ({
+    'request-write': ramWrite(item('request', 'Požadavek na video')),
+    buffer: ramWrite(item('received', 'Video a zvuk (část 1)')),
+    'playback-write': ramWrite(item('prepared', 'Video a zvukové vzorky'),
+      ...(!detailed ? [item('commands', 'Příkazy pro grafiku')] : [])),
+    'video-commands-write': ramWrite(item('commands', 'Příkazy pro grafiku'))
+  });
+
+  // Výběr v RAM je součástí obsahu scénáře, neodvozuje se z textu zprávy.
+  // Související data a příkazy shrnujeme do jedné čitelné položky.
+  const calculatorRamFocus = detailed => ({
+    'write-data':focus(detailed ? ['image'] : ['image','commands'],detailed ? undefined : 'Podklady a příkazy'),
+    draw:focus(detailed ? ['image'] : ['image','commands'],detailed ? undefined : 'Podklady a příkazy'),
+    'graphics-commands-read':focus(['commands']),
+    'graphics-upload':focus(['image'])
+  });
+  const youtubeRamFocus = detailed => ({
+    'received-read':focus(['program','received'],'Instrukce a data'),
+    'playback-write':focus(detailed ? ['prepared'] : ['prepared','commands'],detailed ? undefined : 'Data a příkazy'),
+    'video-commands-read':focus(['commands']),
+    'video-read':focus(detailed ? ['prepared'] : ['prepared','commands'],detailed ? 'Video' : 'Video a příkazy'),
+    'graphics-commands-read':focus(['commands']),
+    'graphics-upload':focus(['prepared'],'Video'),
+    'audio-setup':focus(['prepared'],'Zvukové vzorky'),
+    'audio-read':focus(['prepared'],'Zvukové vzorky'),
+    'image-output':focus(['prepared'],'Video'),
+    'sound-output':focus(['prepared'],'Zvukové vzorky'),
+    playback:focus(['prepared'],'Video a zvuk')
+  });
+  const saveRamFocus = {
+    'save-read':focus(['program','document'],'Instrukce a data'),
+    'save-prepare':focus(['document']),
+    'save-transfer':focus(['file'])
+  };
+
+  // Dedikovaná karta načítá příkazy ze systémové RAM, ale obrazové podklady
+  // kopíruje do vlastní VRAM. Nevedeme do ní program CPU ani zvukové vzorky.
+  // Jde o jednu názornou variantu desktopové karty s přímo připojeným monitorem.
+  const withGraphics = (steps, detailed, graphics, video, options = {}) => {
+    if (graphics !== 'dedicated') return steps;
+    const input = video ? 'Komprimované video' : 'Podklady pro obraz';
+    const frames = video ? 'Obrazové snímky' : (options.frameLabel || 'Obraz okna');
+    const imageDescription = options.imageDescription || 'okna kalkulačky';
+    const upload = () => ({ ...step('graphics-upload', 'Karta přenese obrazová data do VRAM',
+      'Kopírovací část grafické karty přenese ' + (video ? 'komprimované video' : 'obrazové podklady') + ' z RAM do vlastní paměti VRAM pomocí DMA. CPU nemusí jednotlivé bajty kopírovat. Příkazy se načítají z RAM; do VRAM zde ukládáme obrazový obsah.',
+      ['ram','gpu','vram'], [flow('ramVram','data',input)], {}, 3500),
+      memoryWrites: { vram:[item('input',input)] } });
+    const read = () => step('graphics-input', 'GPU čte podklady z vlastní VRAM',
+      'GPU načte ' + (video ? 'komprimované video pro dekódování' : 'obrazové podklady ' + imageDescription) + ' z VRAM na grafické kartě. Systémová RAM si dál ponechává svoji kopii.',
+      ['vram','gpu'], [flow('gpuVram','data',input,true)], {}, 2600);
+    const store = () => ({ ...step('graphics-store', 'GPU ukládá hotový obraz do VRAM',
+      video ? 'Videodekodér GPU vytvořil obrazové snímky. Grafická karta je uloží do VRAM, odkud je může číst její zobrazovací část.'
+        : 'GPU zpracuje podklady a vykreslí obraz ' + imageDescription + ' do VRAM. Na monitor se zatím neposílá hotový obraz.',
+      ['gpu','vram'], [flow('gpuVram','data',frames)], options.preparationScreen === null ? {} : { screen:'loading' }, 3100),
+      memoryWrites: { vram:[item('frames',frames)] } });
+    const scanout = () => step('graphics-scanout', 'Zobrazovací část karty čte obraz z VRAM',
+      'Zobrazovací část grafické karty načítá hotový obraz z VRAM. Poté jej odešle jako obrazový signál přímo připojenému monitoru. Při přehrávání se toto čtení průběžně opakuje; zde ukazujeme jeden přenos.',
+      ['vram','gpu'], [flow('gpuVram','data',video ? 'Obrazový snímek' : frames,true)], {}, 2600);
+    const process = s => ({ ...s, description:'Videodekodér GPU zpracuje komprimované video načtené z vlastní VRAM. Vytvoří obrazové snímky, které grafická karta následně uloží zpět do VRAM.' });
+    return steps.flatMap(s => {
+      if (['graphics-request','graphics-notify'].includes(s.id)) return [{ ...s,
+        description:'CPU oznámí dedikované grafické kartě novou práci. Karta si načte příkazy z RAM a podle nich přenese potřebná obrazová data do své VRAM.' }];
+      if (s.id === 'draw' || s.id === 'video-read') {
+        const commands = detailed ? [] : [step('graphics-commands-read', 'GPU načte příkazy z RAM',
+          'Grafická karta načte příkazy ze systémové RAM. Ty určují požadovanou práci a umístění obrazových dat; samy nejsou obrazovým signálem.',
+          ['ram','gpu'], [flow('ramGpu','control','Příkazy pro grafiku')])];
+        return [...commands,upload(),read(),...(!video ? [store()] : detailed ? [process({
+          ...step('video-process','GPU zpracovává video','Zpracování videa ve vlastní paměti karty.',
+            ['gpu'],[],{screen:'loading'},3000), highlights:[highlight('gpu','Zpracování videa')]
+        }),store()] : [])];
+      }
+      if (s.id === 'video-process') return [process(s),store()];
+      if (['ready','playback','image-output'].includes(s.id)) return [scanout(),{ ...s,
+        description:s.id === 'playback'
+          ? 'Grafická karta posílá obraz z připravených snímků ve VRAM a zvuková část přehrává vzorky ze systémové RAM. Další přijaté části videa a zvuku zatím přibývají do RAM; krátká ukázka se pak zastaví.'
+          : 'Grafická karta posílá obrazový signál přímo připojenému monitoru. Hotový obraz je uložený ve VRAM; ' + (video ? 'zvuková část dál používá systémovou RAM.' : (options.outputDescription || 'na monitoru se objeví okno kalkulačky.')) }];
+      return [s];
+    });
+  };
+
   Lab.scenarios = [
     { id: 'calculator', title: 'Spuštění kalkulačky', shortTitle: 'Kalkulačka', subtitle: 'Od kliknutí k otevřenému oknu', icon: 'calculator',
       diagram: { server: false },
+      initialMemory: { ssd: [item('program', 'Kód a data kalkulačky')], ram: [] },
+      emptyMemory: { ram: 'Bez dat kalkulačky' },
       initial: { title: 'Vše začíná jedním kliknutím', description: 'Počítač je zapnutý, kalkulačka neběží a její potřebné části ještě nejsou v RAM. Spusťte ukázku nebo postupujte po jednotlivých krocích.', screen: 'desktop', ramLoaded: false, buffer: 0, playback: false, segment: 0, cpuWork: false, clicked: false },
-      createSteps: detailed => detailed ? calc(true) : calcBasic() },
+      createSteps: (detailed, graphics = 'integrated') => withRamFocus(withGraphics(withMemory(detailed ? calc(true) : calcBasic(), calculatorMemory(detailed)), detailed, graphics, false),calculatorRamFocus(detailed)) },
     { id: 'youtube', title: 'Spuštění videa na YouTube', shortTitle: 'Video na YouTube', subtitle: 'Od přehrání k obrazu a zvuku', icon: 'video',
       diagram: { server: true },
+      initialMemory: { ssd: [item('program', 'Kód a data prohlížeče')], ram: [item('program', 'Kód a data prohlížeče')] },
       initial: { title: 'Video čeká na přehrání', description: 'Prohlížeč i stránka YouTube jsou otevřené, přehrávání stojí a vyrovnávací paměť je prázdná. Úvodní kroky ukazujeme postupně; příjem dalších dat, zpracování a přehrávání se mohou překrývat.', screen: 'youtube', ramLoaded: false, buffer: 0, playback: false, playbackFrom: 0, playbackTo: 0, soundPlaying: false, cpuWork: false, clicked: false },
-      createSteps: detailed => detailed ? youtube(true) : youtubeBasic() }
+      createSteps: (detailed, graphics = 'integrated') => withRamFocus(withGraphics(withMemory(detailed ? youtube(true) : youtubeBasic(), youtubeMemory(detailed)), detailed, graphics, true),youtubeRamFocus(detailed)) },
+    { id:'save', title:'Uložení souboru', shortTitle:'Uložení souboru', subtitle:'Z RAM do paměti SSD', icon:'save',
+      diagram:{server:false},
+      initialMemory:{ssd:[item('program','Kód editoru')],ram:[item('program','Kód a data editoru'),item('document','Rozepsaný dokument')]},
+      initial:{title:'Dokument čeká na uložení',description:'Textový editor je otevřený a v RAM je rozepsaný dokument. Soubor poznamky.txt na SSD ještě není. Ukázka sleduje jeho uložení až do flash paměti SSD.',
+        screen:'editor',ramLoaded:true,buffer:0,playback:false,soundPlaying:false,cpuWork:false,clicked:false},
+      createSteps:detailed => withRamFocus(saveFile(detailed),saveRamFocus) },
+    { id:'boot',title:'Zapnutí počítače',shortTitle:'Zapnutí počítače',subtitle:'Od vypínače k přihlášení',icon:'power',
+      diagram:{server:false,boot:true},
+      initialMemory:{ssd:[item('loader','Zavaděč'),item('system','Systém a data')],ram:[]},
+      emptyMemory:{ram:'Připravená, prázdná'},
+      initial:{title:'Počítač čeká na zapnutí',description:'Počítač je připojený k zásuvce, hlavní napájení je vypnuté. Flash obsahuje firmware UEFI, SSD zavaděč a operační systém. RAM ještě není připravená. Spusťte ukázku stisku vypínače.',
+        screen:'black',powered:false,ramReady:false,cpuSoftware:'Čeká na start',ramLoaded:false,buffer:0,playback:false,soundPlaying:false,cpuWork:false,clicked:false},
+      createSteps:boot }
   ];
 })(window.HWLab);

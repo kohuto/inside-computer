@@ -64,28 +64,29 @@ legend {
 }
 
 .workspace {
+  --diagram-reserve: 260px;
+  --explanation-reserve: 0px;
   display: grid;
-  grid-template-columns: 235px minmax(0,1fr);
-  gap: 30px;
-  max-width: 1660px;
-  margin: 0 auto;
-  padding: 27px 34px 0
+  grid-template-columns: minmax(0,1fr);
+  gap: 18px;
+  width: 100%;
+  padding: 16px 22px
 }
 
-.sidebar {
-  display: flex;
-  flex-direction: column;
-  gap: 25px
+.workspace:has(#show-explanation:checked) {
+  --explanation-reserve: 100px
 }
 
-.section-number {
-  color: #8491a6;
-  font-size: 11px;
-  margin-right: 8px
+.settings {
+  display: grid;
+  grid-template-columns: minmax(0,2.4fr) minmax(170px,1fr) minmax(205px,1.1fr);
+  align-items: start;
+  gap: 24px
 }
 
 #scenario-options {
   display: grid;
+  grid-template-columns: repeat(4,minmax(0,1fr));
   gap: 9px
 }
 
@@ -173,51 +174,15 @@ legend {
   background: #fff
 }
 
-.segmented {
+.visualization-toggles {
   display: flex;
-  background: #e9edf3;
-  padding: 4px;
-  border-radius: 9px
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 26px
 }
 
-.segmented label {
-  flex: 1;
-  position: relative;
-  cursor: pointer
-}
-
-.segmented input {
-  position: absolute;
-  opacity: 0;
-  width: 1px;
-  height: 1px
-}
-
-.segmented span {
-  display: block;
-  text-align: center;
-  padding: 9px 0;
-  font-size: 13px;
-  font-weight: 650;
-  border-radius: 6px;
-  color: var(--muted)
-}
-
-.segmented input:checked+span {
-  background: #fff;
-  color: var(--blue);
-  box-shadow: 0 1px 4px #122a4920
-}
-
-.setting-hint {
-  font-size: 12px;
-  color: var(--muted);
-  line-height: 1.5;
-  margin: 9px 0 0
-}
-
-.explanation-toggle {
-  display: flex;
+.explanation-toggle,.setting-toggle {
+  display: inline-flex;
   align-items: center;
   gap: 10px;
   font-size: 13px;
@@ -226,7 +191,7 @@ legend {
   position: relative
 }
 
-.explanation-toggle input {
+.explanation-toggle input,.setting-toggle input {
   position: absolute;
   opacity: 0;
   width: 1px;
@@ -251,42 +216,21 @@ legend {
   background: white
 }
 
-.explanation-toggle input:checked+.switch {
+.explanation-toggle input:checked+.switch,.setting-toggle input:checked+.switch {
   background: var(--blue)
 }
 
-.explanation-toggle input:checked+.switch:after {
+.explanation-toggle input:checked+.switch:after,.setting-toggle input:checked+.switch:after {
   transform: translateX(13px)
 }
 
-.model-note {
-  display: flex;
-  gap: 9px;
-  margin-top: auto;
-  color: var(--muted);
-  padding-top: 7px
+.detail-picker,.graphics-picker {
+  align-self: center
 }
 
-.model-note svg {
-  width: 17px;
-  height: 17px;
-  flex-shrink: 0;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.6
-}
-
-.model-note p {
-  font-size: 11px;
-  line-height: 1.55;
-  margin: 0
-}
-
-.model-note strong {
-  display: block;
-  color: #4c5c73;
-  font-weight: 600;
-  margin-bottom: 3px
+.setting-toggle {
+  min-height: 44px;
+  font-size: 14px
 }
 
 .lab {
@@ -328,7 +272,24 @@ legend {
 .diagram-area>svg {
   width: 100%;
   height: auto;
+  max-height: max(260px,calc(100dvh - var(--diagram-reserve) - var(--explanation-reserve)));
   overflow: visible
+}
+
+.editor-toolbar {
+  fill: #52627c;
+  font-size: 7px
+}
+
+.editor-text {
+  fill: #384d5b;
+  font-size: 8px
+}
+
+.editor-save {
+  fill: #fff;
+  font-size: 6px;
+  font-weight: 600
 }
 
 .step-area {
@@ -392,13 +353,16 @@ h3 {
   color: #506078
 }
 
-.explanation[hidden] {
+.step-content {
+  margin-top: 12px
+}
+
+.step-content[hidden] {
   display: none
 }
 
 .step-area.explanation-hidden {
-  min-height: 36px;
-  padding-bottom: 5px
+  min-height: 0
 }
 
 .playback-controls {
@@ -463,6 +427,116 @@ h3 {
   border-color: transparent
 }
 
+/* Energie má vlastní vrstvu; u studeného startu čeká na zapnutí hlavních výstupů. */
+svg.computer-off :is(.power-distribution,.power-badges) {
+  display: none
+}
+
+.power-field {
+  fill: #ffc768;
+  fill-opacity: .035
+}
+
+.power-rail,.power-input {
+  fill: none;
+  stroke: #c99a4e;
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+  stroke-linecap: round
+}
+
+.power-rail-halo {
+  stroke-width: 10;
+  opacity: .1
+}
+
+.power-input {
+  stroke: #a98c5b
+}
+
+.power-caption {
+  fill: #88672e;
+  font-size: 14px;
+  font-weight: 600
+}
+
+.power-badge rect {
+  fill: #fff5de;
+  stroke: #dbbe86;
+  stroke-width: 1
+}
+
+.power-badge path {
+  fill: #aa7c27
+}
+
+g.component-psu .node-box,g.component-outlet .node-box {
+  fill: #fffbf3;
+  stroke: #d9c39d
+}
+
+g.component-psu .node-label,g.component-outlet .node-label {
+  fill: #6d593a
+}
+
+.outlet-art>circle:first-child {
+  fill: none;
+  stroke: #b6a17d;
+  stroke-width: 1.5
+}
+
+.outlet-art rect,.outlet-art circle:not(:first-child) {
+  fill: #968163
+}
+
+.voltage-kind {
+  fill: #8b7654;
+  font-size: 12px
+}
+
+.computer-off .voltage-output {
+  opacity: .5
+}
+
+.computer-off .diagram-node:not(.component-psu):not(.component-outlet):not(.component-powerbutton)>:is(.node-box,.node-icon),
+.computer-off :is(#base-routes,#gpu-card,#integrated-note) {
+  opacity: .5
+}
+
+.power-button-icon {
+  fill: none;
+  stroke: #8799b0;
+  stroke-width: 3;
+  stroke-linecap: round
+}
+
+.active .power-button-icon {
+  stroke: var(--flow)
+}
+
+#cpu-software rect {
+  fill: #f6f8fc;
+  stroke: #d6dfec;
+  stroke-width: 1
+}
+
+.software-caption {
+  fill: #6b7c95;
+  font-size: 14px
+}
+
+.software-name {
+  fill: #3e5679;
+  font-size: 18px;
+  font-weight: 650
+}
+
+.login-label {
+  fill: #3e5679;
+  font-size: 11px;
+  font-weight: 650
+}
+
 /* SVG: názvy jsou čitelné i u neaktivních součástí; animace řídí pouze JS. */
 .pc-boundary {
   fill: #fafbfd;
@@ -518,96 +592,64 @@ h3 {
   stroke: #4569c9
 }
 
-/* Plochá pouzdra a plošné spoje: dekorace jsou statické, přenosy zůstávají nad nimi. */
+/* Jednoduché bloky komponent; vnitřní prvky zobrazují pouze obsah a funkční stav. */
 .component-ram .node-box,.component-ssd .node-box {
   fill: #f0f6f3;
   stroke: #c9d9d2
 }
 
-.hardware-art {
-  pointer-events: none
+.component-vram .node-box {
+  fill: #eff5f2;
+  stroke: #cbded4
 }
 
-.hardware-line,.hardware-trace {
-  fill: none;
-  stroke: #a1b2bf;
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  stroke-linejoin: round
+.component-uefi .node-box {
+  fill: #f1f3f8;
+  stroke: #c7d0df
 }
 
-.cpu-pins {
-  stroke-width: 3
+.component-uefi .node-label,.component-ssd .node-label {
+  font-size: 22px
 }
 
-.hardware-trace {
-  stroke: #c1ccd7
+.gpu-card-box {
+  fill: #f8faff;
+  stroke: #c8d4e8;
+  stroke-width: 1.5
 }
 
-.hardware-chip {
-  fill: #718699;
-  stroke: #607589;
-  stroke-width: 1
+.graphics-note {
+  fill: #596a82;
+  font-size: 17px;
+  font-weight: 600
 }
 
-.hardware-chip-mark {
-  fill: none;
-  stroke: #b8c7d2;
-  stroke-width: 1.4;
-  stroke-linecap: round
+.memory-item text,.memory-empty {
+  fill: #203e50;
+  font-size: 20px;
+  font-weight: 650;
+  dominant-baseline: central
 }
 
-.hardware-contact {
-  fill: #c7b77b
-}
-
-.hardware-inset {
-  fill: #eaf0f5;
-  stroke: #c2cfdb;
+.memory-item rect,.memory-placeholder rect {
+  fill: #fff;
+  stroke: #9fb9c0;
   stroke-width: 1.2
 }
 
-.hardware-core {
-  fill: #dbe5ed;
-  stroke: #a4b6c5;
-  stroke-width: 1.3
+.diagram-node.active .memory-item rect {
+  stroke: #86a3dc
 }
 
-.hardware-socket {
-  fill: #e4ebf1;
-  stroke: #849aad;
-  stroke-width: 1.6;
-  stroke-linejoin: round
+.memory-placeholder rect {
+  fill: #f8fafb;
+  stroke: #bacbd2;
+  stroke-dasharray: 4 4
 }
 
-.hardware-jack,.hardware-pixel {
-  fill: #8ca3b6
-}
-
-.hardware-pixel:nth-child(even) {
-  fill: #bacbd7
-}
-
-.diagram-node.active .hardware-line {
-  stroke: #7797cb
-}
-
-.diagram-node.active .hardware-chip {
-  fill: #4f70ab;
-  stroke: #3f609b
-}
-
-.diagram-node.active .hardware-inset,.diagram-node.active .hardware-core {
-  fill: #e3ecff;
-  stroke: #9bb2df
-}
-
-.diagram-node.active .hardware-pixel,.diagram-node.active .hardware-jack {
-  fill: #6789c4
-}
-
-.component-cpu.detailed .cpu-silicon {
-  display: none
+.memory-empty {
+  fill: #586d7d;
+  font-weight: 500
 }
 
 .node-inner {
@@ -682,6 +724,21 @@ h3 {
   stroke-width: 1.8
 }
 
+.flow-packet {
+  pointer-events: none
+}
+
+.flow-packet .flow-label rect {
+  stroke: var(--flow);
+  stroke-opacity: .4
+}
+
+.packet-leader {
+  stroke: var(--flow);
+  stroke-width: 1;
+  opacity: .45
+}
+
 .screen-shell {
   fill: #e3e9f3;
   stroke: #b1bfd2;
@@ -730,10 +787,10 @@ h3 {
 
 @media(min-width:1500px) {
   .workspace {
-    grid-template-columns: 260px minmax(0,1fr);
-    gap: 38px
+    --diagram-reserve: 300px;
+    gap: 22px
   }
-  .sidebar {
+  .settings {
     gap: 27px
   }
   .scenario-text {
@@ -766,7 +823,7 @@ h3 {
   .workspace {
     padding-top: 16px
   }
-  .sidebar {
+  .settings {
     gap: 16px
   }
   .lab-heading {
@@ -784,20 +841,11 @@ h3 {
     padding-top: 10px;
     padding-bottom: 10px
   }
-  .model-note p {
-    font-size: 10px
-  }
-  .setting-hint {
-    margin-top: 7px
-  }
 }
 
 @media(max-height:680px) and (min-width:1001px) {
-  .sidebar {
+  .settings {
     gap: 13px
-  }
-  .model-note {
-    padding-top: 0
   }
   .lab-heading {
     padding-top: 10px
@@ -809,10 +857,30 @@ h3 {
 
 @media(max-width:1150px) {
   .workspace {
-    grid-template-columns: 210px minmax(0,1fr);
-    gap: 18px;
-    padding-left: 22px;
-    padding-right: 22px
+    --diagram-reserve: 345px
+  }
+  .settings {
+    grid-template-columns: minmax(0,1fr) minmax(0,1fr)
+  }
+  .scenario-picker {
+    grid-column: 1 / -1
+  }
+  .scenario-card {
+    padding: 10px;
+    gap: 8px
+  }
+  .scenario-text {
+    font-size: 12px
+  }
+  .scenario-text small {
+    font-size: 10px
+  }
+  .scenario-radio {
+    display: none
+  }
+  .scenario-icon {
+    width: 25px;
+    height: 30px
   }
   .playback-controls {
     gap: 6px
@@ -834,22 +902,12 @@ h3 {
   }
 }
 
-@media(max-width:1000px) {
+@media(min-width:1151px) and (max-width:1499px) {
   .workspace {
-    grid-template-columns: 1fr;
-    padding-top: 20px
-  }
-  .sidebar {
-    display: grid;
-    grid-template-columns: 1.2fr 1fr;
-    gap: 16px 22px
-  }
-  .scenario-picker legend,.detail-picker legend {
-    margin-bottom: 10px
+    --diagram-reserve: 300px
   }
   #scenario-options {
-    grid-template-columns: 1fr 1fr;
-    gap: 8px
+    grid-template-columns: repeat(2,minmax(0,1fr))
   }
   .scenario-card {
     padding: 10px;
@@ -868,14 +926,21 @@ h3 {
     width: 25px;
     height: 30px
   }
-  .detail-picker .setting-hint {
-    display: none
+}
+
+@media(max-width:1000px) {
+  .workspace {
+    padding-top: 20px
   }
-  .explanation-toggle {
-    grid-column: 1/-1
+  .settings {
+    gap: 16px
   }
-  .model-note {
-    display: none
+  .settings legend {
+    margin-bottom: 10px
+  }
+  #scenario-options {
+    grid-template-columns: repeat(4,minmax(0,1fr));
+    gap: 8px
   }
   .diagram-area {
     min-height: 0
@@ -891,21 +956,36 @@ h3 {
   }
 }
 
+@media(max-width:740px) {
+  .settings {
+    grid-template-columns: minmax(0,1fr) minmax(0,1fr)
+  }
+  .scenario-picker {
+    grid-column: 1 / -1
+  }
+  .workspace {
+    --diagram-reserve: 345px
+  }
+}
+
 @media(max-width:600px) {
   .workspace {
     padding: 16px 10px 0;
     gap: 16px
   }
-  .sidebar {
-    display: flex;
+  .settings {
+    grid-template-columns: minmax(0,1fr);
     gap: 15px;
     padding: 0 6px
   }
-  .scenario-picker legend,.detail-picker legend {
-    font-size: 13px
+  #scenario-options {
+    grid-template-columns: repeat(2,minmax(0,1fr))
   }
-  .segmented span {
-    padding: 8px
+  .scenario-card:last-child:nth-child(odd) {
+    grid-column: 1 / -1
+  }
+  .settings legend {
+    font-size: 13px
   }
   .scenario-text {
     font-size: 13px
@@ -955,9 +1035,6 @@ h3 {
   }
   .explanation p {
     font-size: 13px
-  }
-  .setting-hint {
-    display: none
   }
 }
 
