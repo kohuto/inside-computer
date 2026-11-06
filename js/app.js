@@ -12,7 +12,7 @@
   let lastStep = '';
   const player = new Lab.Player(Lab.scenarios, state => {
     diagram.render(state);
-    const stepKey = `${state.scenario.id}:${state.detailed}:${state.graphics}:${state.index}`;
+    const stepKey = `${state.scenario.id}:${state.graphics}:${state.index}`;
     if (lastStep !== stepKey) {
       lastStep = stepKey;
       $('scenario-title').textContent = state.scenario.title;
@@ -33,12 +33,9 @@
   $('next').addEventListener('click', () => player.next());
   $('reset').addEventListener('click', () => player.reset());
   document.querySelectorAll('[name=scenario]').forEach(input => input.addEventListener('change', () => player.select(input.value)));
-  $('show-cpu-detail').addEventListener('change', () => {
-    player.select(player.scenario.id, $('show-cpu-detail').checked);
-  });
-  $('dedicated-graphics').addEventListener('change', () => {
-    player.select(player.scenario.id, player.detailed, $('dedicated-graphics').checked ? 'dedicated' : 'integrated');
-  });
+  document.querySelectorAll('[name=graphics]').forEach(input => input.addEventListener('change', () => {
+    if (input.checked) player.select(player.scenario.id, input.value);
+  }));
   const updateExplanation = () => {
     const visible = $('show-explanation').checked;
     $('explanation').hidden = !visible;

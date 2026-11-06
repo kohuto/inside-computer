@@ -9,16 +9,16 @@ window.HWLab = window.HWLab || {};
       this.onChange = onChange;
       this.request = clock.request || (fn => requestAnimationFrame(fn));
       this.cancel = clock.cancel || (id => cancelAnimationFrame(id));
-      this.detailed = false; this.graphics = 'integrated'; this.frame = null;
-      this.select(scenarios[0].id, false);
+      this.graphics = 'integrated'; this.frame = null;
+      this.select(scenarios[0].id);
     }
-    select(id, detailed = this.detailed, graphics = this.graphics) {
+    select(id, graphics = this.graphics) {
       const scenario = this.scenarios.find(s => s.id === id);
       if (!scenario) throw new Error('Neznámý scénář: ' + id);
       if (!['integrated','dedicated'].includes(graphics)) throw new Error('Neznámá grafika: ' + graphics);
-      this.stopClock(); this.scenario = scenario; this.detailed = detailed;
+      this.stopClock(); this.scenario = scenario;
       this.graphics = graphics;
-      this.steps = scenario.createSteps(detailed, graphics); this.reset();
+      this.steps = scenario.createSteps(graphics); this.reset();
     }
     stopClock() {
       if (this.frame !== null) this.cancel(this.frame);
@@ -143,7 +143,7 @@ window.HWLab = window.HWLab || {};
       }
       const phaseEnd = step?.phases?.[phaseIndex+1]?.at ?? 1;
       const phaseProgress = phase ? Math.min(1,Math.max(0,(progress-phase.at)/(phaseEnd-phase.at))) : progress;
-      return { scenario:this.scenario, detailed:this.detailed, graphics:this.graphics, steps:this.steps, index:this.index,
+      return { scenario:this.scenario, graphics:this.graphics, steps:this.steps, index:this.index,
         progress, phaseIndex, phaseProgress, status:this.status, step, effects, memory,
         displayMemory:{...memory,ram:ramDisplay},
         active:phase?.active ?? step?.active ?? [], flows:phase?.flows ?? step?.flows ?? [],

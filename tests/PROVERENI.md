@@ -1,5 +1,77 @@
 # Ověření aplikace
 
+## Volba grafiky v záhlaví vizualizace (6. 11. 2026)
+
+Původní vypínač nad vizualizací nahrazuje kompaktní dvojice „Integrovaná | Dedikovaná“ pod názvem scénáře. Jde o nativní rádiová tlačítka se skupinou „Typ grafiky“, viditelnou vybranou variantou a zaměřením klávesnice. Na úzkých displejích se ovládání animace přesune pod volbu grafiky. Výběr činnosti využívá celou šířku horní části stránky.
+
+Všech 42 testů prošlo. V Chromium ověřeno všech osm kombinací scénáře a grafiky, správný počet kroků a viditelnost VRAM, zrušení rozpracované animace a návrat na výchozí stav při změně grafiky. Klávesa šipka doprava přepnula na dedikovanou variantu, přesunula zaměření a aktualizovala schéma. Vizuálně ověřeno 1920 × 1080, 728 × 743 a 390 × 844; při 1280 × 720 a 1010 × 858 navíc změřeno umístění přepínače pod názvem a absence překryvů ovládání. Stránka nemá vodorovný přesah; na velkém displeji se celé okno s vypnutým vysvětlením vejde do výšky.
+
+## Poloha vykonávaného softwaru v procesoru (6. 11. 2026)
+
+Obdélníček `cpu-software` je součástí skupiny procesoru a leží uvnitř jeho spodní části s odsazením 12 jednotek. Při obou grafikách v Chromium ověřeno umístění obdélníčku i všech textů „Čeká na start“, „UEFI“, „Zavaděč“ a „Operační systém“ uvnitř procesoru. Kontrola 1 312 poloh startu nenašla překryvy ani ořezy přenosových popisků; pauza, reset a shoda automatiky s krokováním prošly. Rozměry procesoru a spojnice se nemění.
+
+## Aktuální stav – zpřesnění popisků startu počítače (6. 11. 2026)
+
+Upraveny názvy kroků, všechna vysvětlení, výchozí stav a vybrané popisky přenosů a pamětí scénáře Zapnutí počítače. Rozlišují napájení ATX a reset, rané vykonávání firmwaru a další moduly v RAM, ovladač firmwaru a běžící systém, fronty NVMe, doorbell, DMA, předání řízení a ExitBootServices. Načítání přihlašovacího prostředí je zahrnuté do děje po spuštění jádra. Integrovaná i dedikovaná grafika vysvětlují zápisy výsledných ploch do paměti a průběžné čtení zobrazovací částí. Dedikovaná větev má vlastní texty pro start, bez odkazu na přehrávání videa. Po inicializaci RAM se zobrazuje „Bez dat systému“ místo tvrzení o prázdné paměti. Zdroje jsou v README.
+
+Všech 42 testů, kontrola syntaxe a kontrola bílých znaků prošly. Stávající kontrola sekvence má aktualizované očekávané texty čtyř přenosů. Porovnání definic před a po úpravě potvrdilo shodné ostatní scénáře a zachování všech tras, fází, stavů a časování startu. Skutečnými ovládacími prvky v Chromium ověřeno všech 14 a 18 názvů a vysvětlení. Kontrola SVG prošla 1 312 poloh obou variant bez kolizí popisků, ořezů nebo chyb pohybu; automatické a krokované přehrání končí shodným obrazem, pauza a reset fungují. Vizuálně ověřen dlouhý text načítání zavaděče při 728 × 743, bez ořezu a vodorovného přesahu.
+
+## Předchozí stav – zpřesnění vysvětlení ukládání (6. 11. 2026)
+
+Zpřesněno všech osm vysvětlení a výchozí stav scénáře Uložení souboru. Texty odlišují vstup myši od významu tlačítka, instrukce CPU a cache, přípravu bajtů editoru, systémovou souborovou cache, práci systému souborů a ovladače, příkazovou frontu a doorbell, DMA a interní zápis do NAND. Závěr zahrnuje metadata, předání dat ze systémových bufferů a případné vyprázdnění zapisovací cache SSD nebo FUA; potvrzení v editoru odlišuje od trvalého uložení. Zdroje jsou uvedené v README.
+
+Pořadí, počet kroků, popisky přenosů, změny pamětí a animace zůstávají zachované. Kontrola syntaxe, všech 42 testů a kontrola bílých znaků prošly. V Chromium ověřeno všech osm vysvětlení při obou variantách grafiky a jejich umístění v panelu. Nejdelší závěrečný text je při 728 × 743 celý čitelný bez ořezu a bez vodorovného přesahu stránky. Konzole bez chyb a varování.
+
+## Předchozí stav – zpřesnění vysvětlení videa (5. 11. 2026)
+
+Zpřesněna výchozí vysvětlení a všechny kroky YouTube pro integrovanou i dedikovanou grafiku. Texty rozlišují software a řadiče, síťové a přehrávací buffery, DMA, instrukce CPU a příkazy dekodéru, komprimované video a snímky v paměti. Popisují průběžné doplňování zvukových vzorků, čtení obrazu a časování obou výstupů. Podporu hardwarového dekódování a variantu s přesunem do VRAM uvádějí jako předpoklad modelu. Technické zdroje jsou uvedené v README.
+
+Sekvence, popisky přenosů a animace se nemění. Všech 42 testů prošlo. Skutečnými ovládacími prvky v Chromium ověřeno zobrazení všech 14 a 18 vysvětlení a jejich umístění uvnitř panelu. Při 728 × 743 je dlouhý text kroku příjmu do RAM celý čitelný, bez vodorovného přesahu stránky. Konzole bez chyb a varování.
+
+## Předchozí stav – zobrazení kalkulačky po přijetí signálu (5. 11. 2026)
+
+Přenos obrazového signálu je samostatný krok `display-signal`. Monitor po celou dobu přenosu a při zastavení na jeho konci dál ukazuje přípravu obrazu. Teprve následující závěrečný krok `ready` zobrazí kalkulačku; neobsahuje přenos. S integrovanou grafikou má scénář 10 kroků, s dedikovanou 14. Čtení obrazu z VRAM se v dedikované variantě vloží před odeslání signálu, nikoli před finální zobrazení.
+
+Všech 42 testů prošlo. Nová kontrola pro obě grafiky ověřuje skrytí kalkulačky během přenosu i po jeho dojezdu, samostatné zobrazení, pauzu, automatiku, krokování a reset. Skutečnými ovládacími prvky v Chromium ověřeny stejné přechody, správná čísla kroků 9 → 10 a 13 → 14, zmrazení SVG při pauze a odstranění zpráv v závěrečném kroku. Reset vrací plochu bez kalkulačky. Konzole bez chyb a varování.
+
+## Předchozí stav – bez čekacích kroků CPU (4. 11. 2026)
+
+Odstraněny samostatné kroky „Zpracování“, „Příprava přehrávání“ a „Příprava souboru“. Ve startu počítače se inicializace, výběr zavaděče, jeho vykonání a spuštění systému sloučily s odpovídajícími přenosy. Po každém příjmu instrukcí a dat do CPU hned následuje odeslání další zprávy. Vysvětlení zachovávají význam zpracování; RAM se zpřístupní až dokončením načtení a spuštění firmwaru, ještě před prvním zápisem požadavku. Zpracování GPU a zápis do flash SSD zůstávají samostatné. Žádná ozubená kolečka se nepřidávají.
+
+| Scénář | Integrovaná grafika | Dedikovaná grafika |
+| --- | ---: | ---: |
+| Kalkulačka | 9 | 13 |
+| YouTube | 14 | 18 |
+| Uložení souboru | 8 | 8 |
+| Zapnutí počítače | 14 | 18 |
+
+Všech 41 testů prošlo. Přímou návaznost přenosů CPU ověřuje kontrola pro všech osm kombinací scénáře a grafiky. Zachované jsou kontroly průběhu a výsledků pamětí, připravenosti RAM, přechodů firmwaru / zavaděče / systému, VRAM, pauzy a resetu. Prohlížečová kontrola všech osmi variant prošla 4 674 poloh bez chyb nebo kolizí popisků; automatika a krokování končí shodným SVG.
+
+## Předchozí stav – odstranění cache a registrů (4. 11. 2026)
+
+Cache, registry, jejich vnitřní spojnice a přepínač byly odstraněny. Přehrávač už nemá podrobnou variantu; všechny scénáře používají přímou logickou trasu RAM ↔ procesor. SSD, RAM, flash paměť s UEFI a volitelná VRAM zůstávají zachované. Výběr scénáře i přepínač dedikované grafiky fungují nad vizualizací.
+
+| Scénář | Integrovaná grafika | Dedikovaná grafika |
+| --- | ---: | ---: |
+| Kalkulačka | 10 | 14 |
+| YouTube | 15 | 19 |
+| Uložení souboru | 9 | 9 |
+| Zapnutí počítače | 18 | 22 |
+
+Všech 41 testů prošlo příkazem `node --test tests/player.test.cjs`. Kontrolují všech osm kombinací scénáře a grafiky, přesné sekvence přenosů, dokončení, aktualizace pamětí, VRAM, pauzu, reset, přepínání a společný čas ventilátoru. Odstraněny jsou pouze testy zrušené podrobné varianty; invarianty průběhu se nadále ověřují pro obě grafiky.
+
+V Chromium prošlo všech osm variant: 5 248 vzorkovaných stavů bez chyb pohybu, přesahů uloženého obsahu a kolizí popisků. Automatika a krokování mají shodné výsledné SVG. Skutečnými ovládacími prvky ověřeno přepnutí grafiky, všechny čtyři scénáře, přehrání, pauza, reset a vysvětlení. Cache ani registry nejsou v DOM; UEFI a správná viditelnost VRAM jsou zachované. Vizuálně ověřeno 1920 × 1080 a 728 × 743; při 390 × 844 nevzniká vodorovný přesah stránky. Konzole bez chyb a varování.
+
+## Menší procesor (4. 11. 2026)
+
+Blok procesoru má nově 200 × 130 místo 220 × 190 jednotek SVG. Zachovává střed i zarovnání vodorovných cest k SSD a grafice; porty odvozené z rozměrů upravují délky spojnic. Popisek zpracování se centruje ve zbývající ploše pod názvem, označení vykonávaného softwaru při startu sleduje spodní hranu procesoru.
+
+Všech 41 testů prošlo. Opakovaná kontrola všech osmi variant a 5 248 poloh nenašla chyby přenosů ani kolize popisků. Všechny popisky zpracování se vejdou dovnitř menšího CPU. Vizuálně ověřeno 1920 × 1080.
+
+## Historická ověření před odstraněním cache a registrů
+
+Následující záznamy zachycují předchozí verze aplikace, včetně již odstraněného přepínače a podrobného režimu.
+
 Ověřeno 2. 11. 2026 v prohlížeči Chromium, otevřením `index.html` přímo z disku.
 
 ## Čip s UEFI
@@ -143,3 +215,19 @@ RAM už nezobrazuje narůstající seznam položek. Po dokončení načtení kal
 Obsah pamětí využívá celou vyhrazenou plochu pod názvem komponenty. RAM používá písmo až 24 jednotek SVG místo původních 16; SSD a VRAM až 20 a UEFI 24. Písmo je tmavší a tučnější, podklad bílý s výraznějším okrajem. Více položek si rozděluje dostupnou výšku a velikost písma se upraví podle změřených rozměrů zalomeného textu. Prázdný stav má přerušovaný rámeček. Rozměry komponent a porty se nemění.
 
 Všech 52 testů prošlo. Prohlížečová kontrola všech 16 variant a 10 865 poloh ověřila obsah podle `displayMemory`, text uvnitř jeho plochy, návaznost animací, pauzu, reset a shodu automatiky s krokováním. Žádné přesahy ani kolize s datovými popisky nebyly zjištěné. Vizuálně ověřeno načtení kalkulačky při 1010 × 858 a dvě položky VRAM při 728 × 743; stránka nemá vodorovný přesah. Konzole je bez chyb a varování.
+
+## Zjednodušené chlazení – 4. 11. 2026
+
+Chlazení představuje pouze kruhový ventilátor s otáčejícími se lopatkami, popiskem a značkou napájení. Je dole mezi CPU a oblastí grafiky, vlevo od VRAM dedikované varianty. Žebrování, tepelná spojnice, rámeček chladiče a obě šipky proudění byly odstraněné včetně nepoužívaných SVG značek, stylů a časového posunu proudění. Cache, registry, uložený obsah i datové trasy zůstávají čitelné.
+
+Všech 53 testů prošlo. Kontrola ventilátoru chrání ve všech 16 variantách návaznost mezi kroky, zastavení při pauze, pokračování ze stejné polohy, obnovení při resetu, vypnutý stav při studeném startu a shodnou výslednou polohu při automatice i krokování. Prohlížečová kontrola 10 865 poloh nenašla kolize štítků s ventilátorem, jeho názvem ani ostatním obsahem a ověřila úplné odstranění staré grafiky.
+
+Skutečnými ovládacími prvky byly ověřeny pauza a reset startu počítače s cache i dedikovanou grafikou. Pauza zachovala celé SVG, reset vrátil ventilátor do výchozí polohy a skryl jeho napájení. Ventilátor používá společný čas přehrávání bez nezávislé CSS animace. Vizuálně ověřeno 1920 × 1080 i 728 × 743; při 390 × 844 nevznikl vodorovný přesah stránky.
+
+## Zdroj na spodním okraji – 4. 11. 2026
+
+Zdroj je zasazený do spodního okraje počítače. Přívod vystupuje ze středu pravého boku zásuvky, vede doprava a připojuje se zespodu doprostřed spodní hrany zdroje. Výstup vede z pravého boku rovně po spodní napájecí čáře doprava. Název a napětí zásuvky jsou vlevo od symbolu; stejnosměrné napětí je pod výstupem vpravo od zdroje, hodnoty na druhém řádku. Zvýraznění zapnutí je nad zdrojem. Pohyblivý popisek kliknutí je u začátku cesty výše, aby nechal nové údaje napětí čitelné.
+
+Všech 53 testů prošlo. Upravená kontrola geometrie chrání umístění na okraji, výstup z pravé strany zásuvky, vstup do středu spodní hrany zdroje zespodu, vodorovný výstup a oddělení střídavého přívodu od stejnosměrného rozvodu. Prohlížečová kontrola všech 16 variant a 10 865 poloh nenašla přesahy ani kolize datových popisků s údaji napětí; automatika, krokování, pauza a reset zůstávají shodné.
+
+Vizuálně ověřeno 1920 × 1080 a start s cache a dedikovanou grafikou při 728 × 743. Všechny popisky zdroje a zásuvky leží uvnitř SVG. Při 390 × 844 nevznikl vodorovný přesah stránky.

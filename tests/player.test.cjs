@@ -8,12 +8,12 @@ vm.createContext(context);
 for (const file of ['scenarios.js','player.js','diagram.js']) {
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../js',file),'utf8'),context);
 }
-const {Player,scenarios,routes,layout,connections,transferProgress,power} = context.window.HWLab;
-const graphicsScenarios=scenarios.filter(s=>s.createSteps(false).some(step=>step.flows.some(flow=>flow.route==='cpuGpu')));
+const {Player,scenarios,routes,layout,connections,transferProgress,power,coolingMotion} = context.window.HWLab;
+const graphicsScenarios=scenarios.filter(s=>s.createSteps().some(step=>step.flows.some(flow=>flow.route==='cpuGpu')));
 const plain = value => JSON.parse(JSON.stringify(value));
 const clocks = new WeakMap();
 function stepForward(player) { player.next(); clocks.get(player)(100000); }
-function harness(id='calculator',detailed=false,graphics='integrated') {
+function harness(id='calculator',graphics='integrated') {
   let sequence=0, now=0;
   const pending = new Map();
   const changes=[];
@@ -21,7 +21,7 @@ function harness(id='calculator',detailed=false,graphics='integrated') {
     request(fn) { const id=++sequence; pending.set(id,fn); return id; },
     cancel(id) { pending.delete(id); }
   });
-  player.select(id,detailed,graphics);
+  player.select(id,graphics);
   const advance = ms => {
     for(let remaining=ms;remaining>0;remaining-=Math.min(remaining,20)) {
       now+=Math.min(remaining,20); const callbacks=[...pending.values()]; pending.clear(); callbacks.forEach(fn=>fn(now));
@@ -35,10 +35,11 @@ function finishStepping(player) {
   while(player.status!=='ended'&&clicks++<100)stepForward(player);
   assert.equal(player.status,'ended');
 }
-for (const scenario of scenarios) for (const detailed of [false,true]) {
-  test(`${scenario.id}/${detailed?'podrobné':'základní'}: definice a úplný průběh`,()=>{
-    const h=harness(scenario.id,detailed), p=h.player;
+for (const scenario of scenarios) for (const graphics of ['integrated','dedicated']) {
+  test(`${scenario.id}/${graphics}: definice a úplný průběh`,()=>{
+    const h=harness(scenario.id,graphics), p=h.player;
     assert.equal(p.index,-1);
+    const initialMemory=plain(p.snapshot().memory);
     assert.equal(new Set(p.steps.map(s=>s.id)).size,p.steps.length);
     for(const s of p.steps) {
       assert.ok(s.duration>0 && s.title && s.description);
@@ -47,54 +48,31 @@ for (const scenario of scenarios) for (const detailed of [false,true]) {
         assert.ok(s.phases.every((part,i)=>part.at>=0&&part.at<1&&(!i||part.at>s.phases[i-1].at)));
       }
       for(const frame of [s,...(s.phases||[]).map(part=>({...s,...part}))]) {
-        if(detailed)assert.equal(frame.flows.length,frame.highlights?.length?0:1);
         for(const f of frame.flows) { assert.ok(routes[f.route],f.route); assert.ok(['control','data','output'].includes(f.type)); }
         if(scenario.id==='calculator') assert.ok(!frame.active.some(c=>['network','server','audio','speakers'].includes(c)));
         if(scenario.id==='youtube') assert.ok(!frame.active.includes('ssd'));
-        if(!detailed) {
-          assert.ok(!frame.active.some(c=>['cache','registers'].includes(c)));
-          for(const item of [...frame.flows,...(frame.highlights||[])])assert.ok(item.label.trim().split(/\s+/u).length<=3,item.label);
-        }
+        assert.ok(!frame.active.some(c=>['cache','registers'].includes(c)));
+        for(const item of [...frame.flows,...(frame.highlights||[])])assert.ok(item.label.trim().split(/\s+/u).length<=3,item.label);
       }
     }
     p.play(); h.advance(100000);
     assert.equal(p.status,'ended'); assert.equal(h.pending.size,0);
     assert.equal(p.index,p.steps.length-1); assert.equal(p.snapshot().progress,1);
     assert.equal(p.snapshot().effects.screen,{calculator:'calculator',youtube:'video',save:'editor',boot:'login'}[scenario.id]);
-    const stepper=harness(scenario.id,detailed);
+    const stepper=harness(scenario.id,graphics);
     finishStepping(stepper.player);
     assert.deepEqual(plain(stepper.player.snapshot().effects),plain(p.snapshot().effects));
     assert.deepEqual(plain(stepper.player.snapshot().memory),plain(p.snapshot().memory));
     p.reset(); assert.deepEqual(plain(p.snapshot().effects),plain(scenario.initial));
-    assert.deepEqual(plain(p.snapshot().memory),plain(scenario.initialMemory));
+    assert.deepEqual(plain(p.snapshot().memory),initialMemory);
     assert.equal(p.index,-1); assert.equal(h.pending.size,0);
   });
 }
-test('Zjednodušené přípravy zastupují stejné rozvedené kroky podrobného režimu',()=>{
-  const groups={
-    calculator:{'read-request':['read-request','read-request-read'],load:['load','read-complete'],execute:['calculator-cache','calculator-registers','execute','read-data'],process:[],'write-data':['write-data','graphics-commands-write'],draw:['graphics-commands-read','draw']},
-    youtube:{'request-notify':['request-notify','request-read'],buffer:['buffer','receive-notify'],prepare:['playback-cache','playback-registers'],'playback-write':['playback-write','video-commands-write'],'video-read':['video-commands-read','video-read'],'video-process':[],playback:['image-output','sound-output']},
-    save:{},boot:{}
-  };
-  for(const scenario of scenarios){
-    const base=scenario.createSteps(false),detail=scenario.createSteps(true);
-    assert.deepEqual(plain(base.flatMap(s=>groups[scenario.id][s.id]||[s.id])),plain(detail.map(s=>s.id)));
-    const preparation=base.find(s=>s.id===({calculator:'process',youtube:'prepare',save:'save-prepare',boot:'system-start'}[scenario.id]));
-    assert.deepEqual(plain(preparation.active),['cpu']);assert.equal(preparation.flows.length,0);
-    assert.equal(preparation.highlights[0].label,{calculator:'Zpracování',youtube:'Příprava přehrávání',save:'Příprava souboru',boot:'Spouštění systému'}[scenario.id]);
-  }
-});
-test('Čtení z SSD odděluje přípravu příkazu, oznámení, přenos obsahu a dokončení',()=>{
-  for(const detailed of [false,true]) {
-    const h=harness('calculator',detailed),p=h.player;
-    assert.equal(p.steps.length,detailed?16:10);
-    const expected=detailed?[
-      {route:'ramCpu',type:'control',label:'Požadavek na načtení',reverse:true},
-      {route:'cpuSsd',type:'control',label:'Oznámení nového požadavku'},
-      {route:'ssdRam',type:'control',label:'Požadavek na načtení',reverse:true},
-      {route:'ssdRam',type:'data',label:'Kód a data'},
-      {route:'cpuSsd',type:'control',label:'Oznámení dokončení',reverse:true}
-    ]:[
+test('Čtení z SSD odděluje přípravu příkazu, oznámení a přenos obsahu',()=>{
+  for(const graphics of ['integrated','dedicated']) {
+    const h=harness('calculator',graphics),p=h.player;
+    assert.equal(p.steps.length,graphics==='dedicated'?14:10);
+    const expected=[
       {route:'ramCpu',type:'control',label:'Požadavek na načtení',reverse:true},
       {route:'cpuSsd',type:'control',label:'Oznámení nové práce'},
       {route:'ssdRam',type:'data',label:'Kód a data'}
@@ -103,37 +81,13 @@ test('Čtení z SSD odděluje přípravu příkazu, oznámení, přenos obsahu a
     for(const [i,transfer]of expected.entries()){
       stepForward(p);const state=p.snapshot();
       assert.deepEqual(plain(state.flows),[transfer]);
-      assert.equal(state.effects.ramLoaded,i>=(detailed?3:2));
+      assert.equal(state.effects.ramLoaded,i>=2);
     }
     const loaded=p.steps.findIndex(s=>s.id==='load'),execute=p.steps.findIndex(s=>s.id==='execute');
-    assert.equal(p.steps[loaded+1].id,detailed?'read-complete':'execute');
+    assert.equal(p.steps[loaded+1].id,'execute');
     assert.ok(execute>loaded,'CPU načítá program až po přenosu obsahu do RAM');
-    const video=scenarios.find(s=>s.id==='youtube').createSteps(detailed);
+    const video=scenarios.find(s=>s.id==='youtube').createSteps(graphics);
     assert.ok(video.every(s=>s.flows.every(f=>!['cpuSsd','ssdRam'].includes(f.route))));
-  }
-});
-test('Podrobný režim čte instrukce i pracovní data z RAM, zápis používá stejnou cestu opačně',()=>{
-  assert.equal(routes.cpuRam,undefined);
-  assert.deepEqual(plain(routes.ramCache.points[0]),plain(routes.ramCpu.points[0]));
-  assert.equal(routes.ramCache.points[1][0],routes.ramCpu.points[1][0]);
-  for(const detailed of [true]) {
-    const calc=scenarios.find(s=>s.id==='calculator').createSteps(detailed);
-    const index=calc.findIndex(s=>s.id==='execute');
-    const transfers=calc.slice(index,index+3);
-    assert.deepEqual(plain(transfers.map(s=>s.id)),['execute','read-data','write-data']);
-    assert.deepEqual(plain(transfers.map(s=>s.flows)),[
-      [{route:'ramCpu',type:'control',label:'instrukce programu'}],
-      [{route:'ramCpu',type:'data',label:'čtení dat'}],
-      [{route:'ramCpu',type:'data',label:'Připravené podklady pro obraz',reverse:true}]
-    ]);
-    const video=scenarios.find(s=>s.id==='youtube').createSteps(detailed);
-    const read=video.find(s=>s.id==='received-read'),write=video.find(s=>s.id==='playback-write');
-    assert.ok(video.indexOf(write)>video.indexOf(read));
-    assert.ok(read.flows.some(f=>f.route==='ramCpu' && !f.reverse && f.label==='Přijatá data'));
-    assert.ok(write.flows.some(f=>f.route==='ramCpu' && f.reverse && f.label==='Připravená data přehrávání'));
-    for(const s of [...calc,...video]) {
-      assert.ok(s.flows.filter(f=>['ramCpu','ramCache'].includes(f.route)).length<=1);
-    }
   }
 });
 test('Spojnice mají porty ve středech stran a trasy vedou po společných úsecích',()=>{
@@ -151,7 +105,6 @@ test('Spojnice mají porty ve středech stran a trasy vedou po společných úse
     assert.deepEqual(plain(routes[id].points[0]),port(from,sideA),id+' začátek');
     assert.deepEqual(plain(routes[id].points.at(-1)),port(to,sideB),id+' konec');
   }
-  assert.ok(routes.ramCache.points.some(p=>p[0]===port('cpu','top')[0]&&p[1]===port('cpu','top')[1]));
   const segments=Object.values(connections).flatMap(r=>r.points.slice(1).map((b,i)=>[r.points[i],b]));
   const contains=(a,b,p,q)=>{
     if(a[0]===b[0]&&p[0]===q[0]&&a[0]===p[0])return Math.min(a[1],b[1])>=Math.min(p[1],q[1])&&Math.max(a[1],b[1])<=Math.max(p[1],q[1]);
@@ -165,9 +118,16 @@ test('Spojnice mají porty ve středech stran a trasy vedou po společných úse
 });
 test('Napájení má samostatnou vrstvu; zdroj se nepřekrývá s datovým schématem a AC se nespojí s DC',()=>{
   const psu=layout.nodes.psu,outlet=layout.nodes.outlet;
-  assert.deepEqual(plain(power.ac.points[0]),[outlet.x+outlet.w/2,outlet.y]);
+  assert.deepEqual(plain(power.ac.points[0]),[outlet.x+outlet.w,outlet.y+outlet.h/2]);
   assert.deepEqual(plain(power.ac.points.at(-1)),[psu.x+psu.w/2,psu.y+psu.h]);
   assert.deepEqual(plain(power.dc.points[0]),[psu.x+psu.w,psu.y+psu.h/2]);
+  assert.ok(power.ac.points[1][0]>outlet.x+outlet.w,'Kabel vychází ze zásuvky doprava');
+  assert.equal(power.ac.points[1][1],power.ac.points[0][1]);
+  assert.equal(power.ac.points.at(-2)[0],power.ac.points.at(-1)[0]);
+  assert.ok(power.ac.points.at(-2)[1]>power.ac.points.at(-1)[1],'Kabel vstupuje do spodní hrany zdroje zespodu');
+  assert.equal(power.dc.points[1][1],power.dc.points[0][1],'Výstup vede rovně doprava');
+  assert.ok(power.dc.points[1][0]>power.dc.points[0][0]);
+  assert.ok(psu.y<layout.boundary.y+layout.boundary.h&&psu.y+psu.h>layout.boundary.y+layout.boundary.h,'Zdroj je zasazený do spodního okraje počítače');
   assert.ok(outlet.y>layout.boundary.y+layout.boundary.h,'Zásuvka je mimo počítač');
   for(const id of [...power.components,...power.dedicatedComponents]){
     const b=layout.nodes[id];assert.ok(b,id);
@@ -184,102 +144,6 @@ test('Napájení má samostatnou vrstvu; zdroj se nepřekrývá s datovým sché
   }
   assert.ok(!Object.values(routes).includes(power.ac)&&!Object.values(routes).includes(power.dc),'Energie není datová zpráva přehrávače');
 });
-test('Podrobný YouTube zachovává 18 hlavních přenosů včetně oznámení a směrů',()=>{
-  const expected=[
-    ['mouseCpu',false,'Kliknutí na Přehrát'],
-    ['ramCpu',true,'Požadavek na video'],
-    ['cpuNetwork',false,'Oznámení nového požadavku'],
-    ['networkRam',true,'Požadavek na video'],
-    ['networkServer',false,'Požadavek na video'],
-    ['serverNetwork',false,'Video a zvuk'],
-    ['networkRam',false,'Video a zvuk'],
-    ['cpuNetwork',true,'Oznámení přijatých dat'],
-    ['ramCpu',false,'Přijatá data'],
-    ['ramCpu',true,'Připravená data přehrávání'],
-    ['ramCpu',true,'Příkazy zpracování videa'],
-    ['cpuGpu',false,'Oznámení nové práce'],
-    ['ramGpu',false,'Příkazy zpracování videa'],
-    ['ramGpu',false,'Video'],
-    ['audioCpu',true,'Nastavení přehrávání'],
-    ['ramAudio',false,'Zvuk'],
-    ['gpuMonitor',false,'Obrazový signál'],
-    ['audioSpeakers',false,'Zvukový signál']
-  ];
-  const scenario=scenarios.find(s=>s.id==='youtube');
-  for(const detailed of [true]){
-    const steps=scenario.createSteps(detailed);
-    assert.equal(steps.length,detailed?20:18);
-    const main=steps.filter(s=>!s.id.startsWith('playback-cache')&&!s.id.startsWith('playback-registers'));
-    assert.deepEqual(plain(main.map(s=>[s.flows[0].route,!!s.flows[0].reverse,s.flows[0].label])),expected);
-    assert.ok(steps.filter(s=>['ramCache','cacheRegisters'].includes(s.flows[0].route)).every(s=>
-      !['Video','Video a zvuk'].includes(s.flows[0].label)));
-  }
-});
-test('Podrobný scénář zachovává návaznost obrazu a zvuku se společným zastavitelným časem',()=>{
-  for(const detailed of[true]){
-    const h=harness('youtube',detailed),p=h.player;
-    for(let i=0;i<p.steps.length-1;i++)stepForward(p);
-    assert.equal(p.snapshot().step.id,'image-output');
-    assert.equal(p.snapshot().effects.soundPlaying,false);
-    assert.equal(p.snapshot().effects.screen,'video');
-    p.play();h.advance(1800);p.pause();
-    const paused=plain(p.snapshot()),count=h.changes.length;
-    assert.equal(paused.step.id,'sound-output');
-    assert.equal(paused.effects.soundPlaying,true);
-    h.advance(5000);assert.deepEqual(plain(p.snapshot()),paused);
-    assert.equal(h.changes.length,count);assert.equal(h.pending.size,0);
-    p.play();h.advance(6000);assert.equal(p.status,'ended');
-    assert.equal(h.pending.size,0);
-    p.reset();assert.equal(p.snapshot().effects.soundPlaying,false);
-    assert.equal(p.snapshot().effects.playback,false);
-    h.changes.length=0;
-    p.play();h.advance(100000);
-    let phase=0;
-    for(const state of h.changes.filter(s=>s.effects.playback)){
-      const e=state.effects,next=e.playbackFrom+(e.playbackTo-e.playbackFrom)*state.progress;
-      assert.ok(next>=phase,'Plynulý postup obrazu');phase=next;
-    }
-    assert.equal(phase,3);
-    assert.equal(p.steps.at(-1).id,'sound-output');
-    assert.equal(p.status,'ended');assert.equal(h.pending.size,0);
-  }
-});
-test('Podrobné scénáře nadále oddělují grafické příkazy od obsahu',()=>{
-  // Start zachovává osmnáct hlavních kroků i se zobrazenou cache.
-  for(const scenario of graphicsScenarios.filter(s=>s.id!=='boot')) for(const detailed of [true]) {
-    const h=harness(scenario.id,detailed),p=h.player;
-    const requestIndex=p.steps.findIndex(s=>s.flows.some(f=>f.route==='cpuGpu'));
-    assert.ok(requestIndex>=0);
-    const request=p.steps[requestIndex],data=p.steps[requestIndex+1];
-    const commandWrite=p.steps[requestIndex-1],content=p.steps[requestIndex+2];
-    assert.equal(commandWrite.flows[0].route,'ramCpu');
-    assert.equal(commandWrite.flows[0].reverse,true);
-    assert.equal(commandWrite.flows[0].type,'control');
-    assert.equal(request.flows[0].label,'Oznámení nové práce');
-    assert.equal(data.flows[0].type,'control');
-    assert.equal(data.flows[0].label,commandWrite.flows[0].label);
-    assert.equal(content.flows[0].route,'ramGpu');
-    assert.equal(content.flows[0].type,'data');
-    assert.ok(!request.flows.some(f=>f.route==='ramGpu'));
-    assert.ok(data.flows.some(f=>f.route==='ramGpu'));
-    assert.ok(!data.flows.some(f=>f.route==='cpuGpu'));
-    assert.ok(p.steps.slice(0,requestIndex).every(s=>s.flows.every(f=>f.route!=='ramGpu')));
-    assert.ok(p.steps.every(s=>!(s.flows.some(f=>f.route==='cpuGpu')&&s.flows.some(f=>f.route==='ramGpu'))));
-    for(let i=0;i<=requestIndex;i++)stepForward(p);
-    assert.ok(p.snapshot().flows.some(f=>f.route==='cpuGpu'));
-    stepForward(p);const stepped=plain(p.snapshot().flows);
-    assert.ok(stepped.some(f=>f.route==='ramGpu'));
-    p.reset();p.play();
-    const before=p.steps.slice(0,requestIndex).reduce((sum,s)=>sum+s.duration,0);
-    h.advance(before+request.duration/2+20);
-    assert.equal(p.snapshot().step.id,request.id);
-    assert.ok(p.snapshot().flows.some(f=>f.route==='cpuGpu'));
-    assert.ok(!p.snapshot().flows.some(f=>f.route==='ramGpu'));
-    h.advance(request.duration/2+100);
-    assert.equal(p.snapshot().step.id,data.id);
-    assert.deepEqual(plain(p.snapshot().flows),stepped);
-  }
-});
 test('Pauza zastaví čas i výstup, pokračování naváže bez skoku',()=>{
   const h=harness(); h.player.play();h.advance(1000);h.player.pause();
   const before=plain(h.player.snapshot()); const events=h.changes.length;
@@ -288,8 +152,8 @@ test('Pauza zastaví čas i výstup, pokračování naváže bez skoku',()=>{
   h.player.play();h.advance(200);assert.ok(h.player.snapshot().progress>before.progress);
 });
 test('Reset a změna scénáře ruší běžící animaci a její efekty',()=>{
-  const h=harness('youtube',true);h.player.play();h.advance(1500);
-  h.player.select('calculator',false);const count=h.changes.length;h.advance(20000);
+  const h=harness('youtube');h.player.play();h.advance(1500);
+  h.player.select('calculator');const count=h.changes.length;h.advance(20000);
   assert.equal(h.changes.length,count);assert.equal(h.pending.size,0);
   assert.equal(h.player.status,'ready');assert.equal(h.player.snapshot().effects.screen,'desktop');
   assert.equal(h.player.snapshot().effects.buffer,0);
@@ -360,18 +224,18 @@ test('Více stisků Spustit nevytvoří více časovačů a dokončený děj lze
   assert.equal(h.player.snapshot().effects.screen,'desktop');assert.equal(h.pending.size,1);
 });
 
-test('Základní scénáře mají přesně 10, 15, 9 a 18 kroků s předepsanými přenosy',()=>{
+test('Scénáře mají přesně 10, 14, 8 a 14 kroků s předepsanými přenosy',()=>{
   const contracts={calculator:[
-    ['mouseCpu',false,'Kliknutí na kalkulačku'],['ramCpu',true,'Požadavek na načtení'],
+    ['mouseCpu',false,'informace o kliknutí'],['ramCpu',true,'Požadavek na načtení'],
     ['cpuSsd',false,'Oznámení nové práce'],['ssdRam',false,'Kód a data'],
-    ['ramCpu',false,'Instrukce a data'],['highlight','cpu','Zpracování'],
+    ['ramCpu',false,'Instrukce a data'],
     ['ramCpu',true,'Podklady a příkazy'],['cpuGpu',false,'Oznámení nové práce'],
-    ['ramGpu',false,'Podklady a příkazy'],['gpuMonitor',false,'Obrazový signál']
+    ['ramGpu',false,'Podklady a příkazy'],['gpuMonitor',false,'Obrazový signál'],['display','calculator']
   ],youtube:[
     ['mouseCpu',false,'Kliknutí na Přehrát'],['ramCpu',true,'Požadavek na video'],
     ['cpuNetwork',false,'Oznámení nové práce'],['networkServer',false,'Požadavek na video'],
     ['serverNetwork',false,'Video a zvuk'],['networkRam',false,'Video a zvuk'],
-    ['ramCpu',false,'Instrukce a data'],['highlight','cpu','Příprava přehrávání'],
+    ['ramCpu',false,'Instrukce a data'],
     ['ramCpu',true,'Data a příkazy'],['cpuGpu',false,'Oznámení nové práce'],
     ['ramGpu',false,'Video a příkazy'],['highlight','gpu','Zpracování videa'],
     ['audioCpu',true,'Spuštění přehrávání'],
@@ -379,25 +243,25 @@ test('Základní scénáře mají přesně 10, 15, 9 a 18 kroků s předepsaným
     [['gpuMonitor',false,'Obrazový signál'],['audioSpeakers',false,'Zvukový signál']]
   ],save:[
     ['mouseCpu',false,'Kliknutí na Uložit'],['ramCpu',false,'Instrukce a data'],
-    ['highlight','cpu','Příprava souboru'],['ramCpu',true,'Data souboru'],
+    ['ramCpu',true,'Data souboru'],
     ['ramCpu',true,'Požadavek na zápis'],['cpuSsd',false,'Oznámení nové práce'],
     ['ssdRam',true,'Požadavek na zápis'],['ssdRam',true,'Data souboru'],
     ['highlight','ssd','Zápis do flash']
   ],boot:[
-    ['highlight','power','Zapnutí napájení'],['uefiCpu',false,'Kód firmwaru'],
-    ['highlight','cpu','Inicializace hardwaru'],['highlight','cpu','Výběr zavaděče'],
-    ['ramCpu',true,'Požadavek na načtení'],['cpuSsd',false,'Oznámení nové práce'],
+    ['highlight','power','Zapnutí napájení'],['uefiCpu',false,'Instrukce firmwaru'],
+    ['ramCpu',true,'Načíst zavaděč'],['cpuSsd',false,'Oznámení nové práce'],
     ['ssdRam',false,'Zavaděč systému'],['ramCpu',false,'Instrukce zavaděče'],
-    ['highlight','cpu','Spuštění zavaděče'],['ramCpu',true,'Požadavek na načtení'],
-    ['cpuSsd',false,'Oznámení nové práce'],['ssdRam',false,'Části systému'],
-    ['ramCpu',false,'Instrukce a data'],['highlight','cpu','Spouštění systému'],
+    ['ramCpu',true,'Načíst jádro'],
+    ['cpuSsd',false,'Oznámení nové práce'],['ssdRam',false,'Jádro a ovladače'],
+    ['ramCpu',false,'Instrukce a data'],
     ['ramCpu',true,'Podklady a příkazy'],['cpuGpu',false,'Oznámení nové práce'],
     ['ramGpu',false,'Podklady a příkazy'],['gpuMonitor',false,'Obrazový signál']
   ]};
   for(const scenario of scenarios){
-    const steps=scenario.createSteps(false);assert.equal(steps.length,contracts[scenario.id].length);
+    const steps=scenario.createSteps();assert.equal(steps.length,contracts[scenario.id].length);
     const actual=steps.map(s=>{
       if(s.highlights?.length)return['highlight',s.highlights[0].target,s.highlights[0].label];
+      if(!s.flows.length&&s.effects.screen)return['display',s.effects.screen];
       const flows=s.flows.length?s.flows:s.phases.at(-1).flows;
       const items=flows.map(f=>[f.route,!!f.reverse,f.label]);return items.length===1?items[0]:items;
     });
@@ -405,41 +269,62 @@ test('Základní scénáře mají přesně 10, 15, 9 a 18 kroků s předepsaným
   }
 });
 
-test('Oba scénáře oddělí čtení, práci CPU a zápis; video má samostatné zpracování GPU',()=>{
-  const calc=harness('calculator').player;
-  for(let i=0;i<5;i++)stepForward(calc);
-  let state=calc.snapshot();
-  assert.equal(state.index,4);assert.equal(state.flows[0].route,'ramCpu');assert.equal(state.flows[0].reverse,undefined);
-  assert.equal(state.flows[0].label,'Instrukce a data');assert.equal(state.effects.ramLoaded,true);
-  stepForward(calc);state=calc.snapshot();
-  assert.deepEqual(plain(state.active),['cpu']);assert.equal(state.flows.length,0);
-  assert.equal(state.highlights[0].target,'cpu');assert.equal(state.highlights[0].label,'Zpracování');
-  stepForward(calc);state=calc.snapshot();
-  assert.equal(state.flows[0].route,'ramCpu');assert.equal(state.flows[0].reverse,true);assert.equal(state.flows[0].label,'Podklady a příkazy');
-  stepForward(calc);stepForward(calc);state=calc.snapshot();
-  assert.equal(state.index,8);assert.equal(state.effects.screen,'loading');assert.equal(state.flows[0].route,'ramGpu');
-  stepForward(calc);state=calc.snapshot();
-  assert.equal(state.index,9);assert.equal(state.status,'ended');assert.equal(state.effects.screen,'calculator');
-  assert.equal(state.flows[0].route,'gpuMonitor');
+test('CPU po přijetí dat rovnou pokračuje přenosem; GPU má samostatné zpracování videa',()=>{
+  const nextTransfers={
+    calculator:{execute:'write-data'},youtube:{'received-read':'playback-write'},
+    save:{'save-read':'save-data'},boot:{'firmware-read':'loader-request','loader-read':'system-request','system-read':'boot-image'}
+  };
+  for(const scenario of scenarios)for(const graphics of ['integrated','dedicated']){
+    const h=harness(scenario.id,graphics),p=h.player;
+    assert.ok(p.steps.every(s=>!s.highlights?.some(h=>h.target==='cpu')),'Bez čekacího kroku CPU');
+    for(const [read,next] of Object.entries(nextTransfers[scenario.id])){
+      const index=p.steps.findIndex(s=>s.id===read);
+      assert.equal(p.steps[index+1].id,next,'Po přijetí '+read+' následuje odeslání');
+      while(p.index<index)stepForward(p);
+      p.next();assert.equal(p.snapshot().step.id,next);assert.ok(p.snapshot().flows.length);
+      assert.ok(p.snapshot().active.includes('cpu'));
+      h.advance(10000);
+    }
+    finishStepping(p);
+    assert.equal(p.snapshot().effects.screen,{calculator:'calculator',youtube:'video',save:'editor',boot:'login'}[scenario.id]);
+  }
   const h=harness('calculator');h.player.play();h.advance(100000);
-  for(const s of h.changes.filter(s=>s.index>=0))assert.equal(s.effects.screen==='calculator',s.index===9);
-
+  for(const s of h.changes.filter(s=>s.index>=0))assert.equal(s.effects.screen==='calculator',s.step.id==='ready');
   const video=harness('youtube').player;
-  for(let i=0;i<7;i++)stepForward(video);state=video.snapshot();
-  assert.equal(state.index,6);assert.equal(state.flows[0].route,'ramCpu');assert.equal(state.flows[0].label,'Instrukce a data');
-  stepForward(video);state=video.snapshot();
-  assert.equal(state.index,7);assert.deepEqual(plain(state.active),['cpu']);assert.equal(state.flows.length,0);
-  assert.equal(state.highlights[0].target,'cpu');assert.equal(state.highlights[0].label,'Příprava přehrávání');
-  stepForward(video);state=video.snapshot();
-  assert.equal(state.index,8);assert.equal(state.flows[0].route,'ramCpu');assert.equal(state.flows[0].reverse,true);assert.equal(state.flows[0].label,'Data a příkazy');
-  stepForward(video);stepForward(video);state=video.snapshot();
-  assert.equal(state.index,10);assert.equal(state.flows[0].label,'Video a příkazy');
-  stepForward(video);state=video.snapshot();
-  assert.equal(state.index,11);assert.deepEqual(plain(state.active),['gpu']);assert.equal(state.flows.length,0);
-  assert.equal(state.highlights[0].label,'Zpracování videa');assert.equal(state.effects.buffer,2);
-  stepForward(video);stepForward(video);stepForward(video);state=video.snapshot();
-  assert.equal(state.index,14);assert.equal(state.effects.playback,true);assert.equal(state.effects.soundPlaying,true);
-  assert.deepEqual(plain(state.flows.map(f=>f.route)),['gpuMonitor','audioSpeakers']);
+  while(video.steps[video.index+1].id!=='video-process')stepForward(video);
+  stepForward(video);const processing=video.snapshot();
+  assert.deepEqual(plain(processing.active),['gpu']);assert.equal(processing.flows.length,0);
+  assert.equal(processing.highlights[0].label,'Zpracování videa');assert.equal(processing.effects.buffer,2);
+  while(video.steps[video.index+1].id!=='playback')stepForward(video);
+  stepForward(video);const playback=video.snapshot();
+  assert.equal(playback.effects.playback,true);assert.equal(playback.effects.soundPlaying,true);
+  assert.deepEqual(plain(playback.flows.map(f=>f.route)),['gpuMonitor','audioSpeakers']);
+});
+
+test('Kalkulačka se zobrazí až v závěrečném kroku po celém obrazovém přenosu',()=>{
+  for(const graphics of ['integrated','dedicated']){
+    const h=harness('calculator',graphics),p=h.player;
+    while(p.steps[p.index+1].id!=='display-signal')stepForward(p);
+    p.next();h.advance(1400);p.pause();
+    assert.equal(p.snapshot().step.id,'display-signal');
+    assert.equal(p.snapshot().effects.screen,'loading');
+    assert.equal(p.snapshot().flows[0].route,'gpuMonitor');
+    const paused=plain(p.snapshot());h.advance(5000);
+    assert.deepEqual(plain(p.snapshot()),paused);
+    stepForward(p);
+    assert.equal(p.snapshot().progress,1);
+    assert.equal(p.snapshot().effects.screen,'loading','Zobrazení čeká na samostatný krok');
+    p.next();
+    assert.equal(p.snapshot().step.id,'ready');
+    assert.equal(p.snapshot().effects.screen,'calculator');
+    assert.equal(p.snapshot().flows.length,0);
+    h.advance(10000);assert.equal(p.status,'ended');assert.equal(h.pending.size,0);
+    p.reset();assert.equal(p.snapshot().effects.screen,'desktop');
+    p.play();h.advance(200000);
+    for(const state of h.changes.filter(s=>s.index>=0)){
+      assert.equal(state.effects.screen==='calculator',state.step.id==='ready');
+    }
+  }
 });
 
 test('Základní YouTube přehrává obraz a zvuk souběžně a při tom doplňuje RAM',()=>{
@@ -457,10 +342,10 @@ test('Základní YouTube přehrává obraz a zvuk souběžně a při tom doplňu
   }
   assert.deepEqual(arrivals,['serverNetwork','networkRam','serverNetwork','networkRam']);
   assert.equal(phase,3);assert.equal(buffer,4);assert.equal(h.player.status,'ended');assert.equal(h.pending.size,0);
-  for(const s of h.changes.filter(s=>s.index>=5&&s.index<14))assert.equal(s.effects.buffer,2);
+  for(const s of h.changes.filter(s=>s.index>=5&&s.step.id!=='playback'))assert.equal(s.effects.buffer,2);
 });
 
-test('Pauza, pokračování, reset a změna režimu ruší i souběžné dílčí přenosy',()=>{
+test('Pauza, pokračování, reset a změna grafiky ruší i souběžné dílčí přenosy',()=>{
   const h=harness('youtube');const p=h.player;
   const before=p.steps.slice(0,-1).reduce((sum,s)=>sum+s.duration,0);
   p.play();h.advance(before+2600);p.pause();
@@ -471,8 +356,8 @@ test('Pauza, pokračování, reset a změna režimu ruší i souběžné dílč�
   p.play();h.advance(200);assert.ok(p.snapshot().progress>paused.progress);
   p.reset();const reset=plain(p.snapshot());h.advance(10000);assert.deepEqual(plain(p.snapshot()),reset);
   assert.equal(reset.flows.length,0);assert.equal(reset.highlights.length,0);assert.equal(reset.effects.buffer,0);
-  p.play();h.advance(200);p.select('youtube',true);
-  assert.equal(p.steps.length,20);assert.equal(p.index,-1);assert.equal(h.pending.size,0);
+  p.play();h.advance(200);p.select('youtube','dedicated');
+  assert.equal(p.steps.length,18);assert.equal(p.index,-1);assert.equal(h.pending.size,0);
 });
 
 test('Krokování a automatika procházejí shodnými vnitřními fázemi',()=>{
@@ -486,8 +371,8 @@ test('Krokování a automatika procházejí shodnými vnitřními fázemi',()=>{
 });
 
 test('Kalkulačka doplní RAM až po dojezdu dat; čtení nemaže RAM ani kód na SSD',()=>{
-  for(const detailed of [false,true]){
-    const h=harness('calculator',detailed),p=h.player;
+  for(const graphics of ['integrated','dedicated']){
+    const h=harness('calculator',graphics),p=h.player;
     const initial=plain(p.snapshot().memory);
     assert.deepEqual(initial.ram,[]);
     assert.equal(initial.ssd[0].label,'Kód a data kalkulačky');
@@ -525,8 +410,8 @@ test('Kalkulačka doplní RAM až po dojezdu dat; čtení nemaže RAM ani kód n
 });
 
 test('Video začíná s prohlížečem v RAM a postupně přidává požadavek, obsah a příkazy',()=>{
-  for(const detailed of [false,true]){
-    const h=harness('youtube',detailed),p=h.player;
+  for(const graphics of ['integrated','dedicated']){
+    const h=harness('youtube',graphics),p=h.player;
     const initial=plain(p.snapshot().memory);
     assert.deepEqual(initial.ram.map(s=>s.id),['program']);
     assert.equal(initial.ram[0].label,'Kód a data prohlížeče');
@@ -544,7 +429,7 @@ test('Video začíná s prohlížečem v RAM a postupně přidává požadavek, 
     }
     finishStepping(p);
     assert.deepEqual(plain(p.snapshot().memory.ram.map(s=>s.id)),['program','request','received','prepared','commands']);
-    assert.equal(p.snapshot().memory.ram.find(s=>s.id==='received').label,detailed?'Video a zvuk (část 1)':'Video a zvuk (části 1–3)');
+    assert.equal(p.snapshot().memory.ram.find(s=>s.id==='received').label,'Video a zvuk (části 1–3)');
     assert.deepEqual(plain(p.snapshot().memory.ssd),initial.ssd);
   }
 });
@@ -572,18 +457,18 @@ test('Obsah paměti se nepropíše do definic a změna scénáře odstraní pře
   const snapshot=p.snapshot();snapshot.memory.ssd[0].label='změněno';snapshot.memory.ram.length=0;
   assert.equal(p.snapshot().memory.ssd[0].label,'Kód a data kalkulačky');
   assert.equal(p.snapshot().memory.ram.length,4);
-  p.select('youtube',true);
+  p.select('youtube');
   assert.deepEqual(plain(p.snapshot().memory.ram.map(s=>s.label)),['Kód a data prohlížeče']);
-  p.next();h.advance(1000);p.select('calculator',false);h.advance(10000);
+  p.next();h.advance(1000);p.select('calculator');h.advance(10000);
   assert.deepEqual(plain(p.snapshot().memory.ram),[]);assert.equal(h.pending.size,0);
 });
 
-for (const scenario of graphicsScenarios) for (const detailed of [false,true]) {
-  test(`${scenario.id}/${detailed?'podrobné':'základní'}/dedikovaná: příkazy z RAM, obraz ve VRAM a shodné přehrání`,()=>{
-    const h=harness(scenario.id,detailed,'dedicated'),p=h.player;
+for (const scenario of graphicsScenarios) {
+  test(`${scenario.id}/dedikovaná: příkazy z RAM, obraz ve VRAM a shodné přehrání`,()=>{
+    const h=harness(scenario.id,'dedicated'),p=h.player;
     assert.equal(p.graphics,'dedicated');
     assert.deepEqual(plain(p.snapshot().memory.vram),[]);
-    assert.equal(p.steps.length,scenario.id==='boot'?22:scenario.id==='calculator'?(detailed?19:14):(detailed?24:19));
+    assert.equal(p.steps.length,scenario.id==='boot'?18:scenario.id==='calculator'?14:18);
     assert.equal(new Set(p.steps.map(s=>s.id)).size,p.steps.length);
     const notify=p.steps.findIndex(s=>['graphics-request','graphics-notify'].includes(s.id));
     assert.equal(p.steps[notify].flows[0].route,'cpuGpu');
@@ -594,7 +479,7 @@ for (const scenario of graphicsScenarios) for (const detailed of [false,true]) {
     assert.equal(p.steps[notify+3].flows[0].reverse,true);
     for (const s of p.steps) for (const part of [s,...(s.phases||[]).map(phase=>({...s,...phase}))]) {
       for (const f of part.flows) assert.ok(routes[f.route],f.route);
-      if (!detailed) for (const f of [...part.flows,...(part.highlights||[])]) assert.ok(f.label.trim().split(/\s+/u).length<=3,f.label);
+      for (const f of [...part.flows,...(part.highlights||[])]) assert.ok(f.label.trim().split(/\s+/u).length<=3,f.label);
       if (s.id!=='playback') assert.ok(part.flows.length<=1,'Příprava používá vždy jeden přenos');
       if (scenario.id==='calculator') assert.ok(!part.active.some(id=>['audio','network','server','speakers'].includes(id)));
       if (scenario.id==='youtube') assert.ok(!part.active.includes('ssd'));
@@ -623,8 +508,8 @@ for (const scenario of graphicsScenarios) for (const detailed of [false,true]) {
   });
 }
 
-test('Přepnutí grafiky ruší přenos, zachová scénář i podrobnost a vyčistí VRAM',()=>{
-  const h=harness('youtube',true,'dedicated'),p=h.player;
+test('Přepnutí grafiky ruší přenos, zachová scénář a vyčistí VRAM',()=>{
+  const h=harness('youtube','dedicated'),p=h.player;
   finishStepping(p);assert.equal(p.snapshot().memory.vram.length,2);
   p.reset();
   const store=p.steps.findIndex(s=>s.id==='graphics-store');
@@ -632,27 +517,27 @@ test('Přepnutí grafiky ruší přenos, zachová scénář i podrobnost a vyči
   p.next();h.advance(1200);
   assert.equal(p.snapshot().step.id,'graphics-store');
   assert.equal(p.snapshot().memory.vram.length,1);
-  p.select(p.scenario.id,p.detailed,'integrated');h.advance(20000);
+  p.select(p.scenario.id,'integrated');h.advance(20000);
   assert.equal(p.index,-1);assert.equal(p.status,'ready');assert.equal(h.pending.size,0);
-  assert.equal(p.scenario.id,'youtube');assert.equal(p.detailed,true);
-  assert.ok(!('vram' in p.snapshot().memory));assert.equal(p.steps.length,20);
+  assert.equal(p.scenario.id,'youtube');
+  assert.ok(!('vram' in p.snapshot().memory));assert.equal(p.steps.length,14);
   assert.ok(!p.steps.some(s=>s.flows.some(f=>routes[f.route].dedicated)));
-  p.select(p.scenario.id,p.detailed,'dedicated');
-  assert.deepEqual(plain(p.snapshot().memory.vram),[]);assert.equal(p.steps.length,24);
-  p.select('calculator');assert.equal(p.graphics,'dedicated');assert.equal(p.detailed,true);
+  p.select(p.scenario.id,'dedicated');
+  assert.deepEqual(plain(p.snapshot().memory.vram),[]);assert.equal(p.steps.length,18);
+  p.select('calculator');assert.equal(p.graphics,'dedicated');
   assert.deepEqual(plain(p.snapshot().memory.ram),[]);
-  p.select('calculator',false);assert.equal(p.graphics,'dedicated');assert.equal(p.steps.length,14);
-  assert.throws(()=>p.select('calculator',false,'unknown'),/Neznámá grafika/);
+  assert.equal(p.steps.length,14);
+  assert.throws(()=>p.select('calculator','unknown'),/Neznámá grafika/);
 });
 
-for(const detailed of [false,true])for(const graphics of ['integrated','dedicated']){
-  test(`Uložení souboru/${detailed?'cache':'bez cache'}/${graphics}: trvalý soubor vznikne až dokončením devátého kroku`,()=>{
-    const h=harness('save',detailed,graphics),p=h.player,initial=plain(p.snapshot().memory);
-    assert.equal(p.steps.length,9);assert.ok(p.steps.every(s=>!s.phases));
+for(const graphics of ['integrated','dedicated']){
+  test(`Uložení souboru/${graphics}: trvalý soubor vznikne až dokončením osmého kroku`,()=>{
+    const h=harness('save',graphics),p=h.player,initial=plain(p.snapshot().memory);
+    assert.equal(p.steps.length,8);assert.ok(p.steps.every(s=>!s.phases));
     assert.ok(!initial.ssd.some(item=>item.id==='file'));
     assert.deepEqual(initial.ram.map(item=>item.id),['program','document']);
-    assert.equal(p.steps[1].flows[0].route,detailed?'ramCache':'ramCpu');
-    assert.equal(p.steps[2].active.includes('registers'),detailed);
+    assert.equal(p.steps[1].flows[0].route,'ramCpu');
+    assert.equal(p.steps[2].id,'save-data');assert.equal(p.steps[2].flows[0].reverse,true);
     assert.equal(p.steps.at(-1).id,'save-flash');
     assert.deepEqual(plain(p.steps.at(-1).active),['ssd']);
     assert.equal(p.steps.at(-1).flows.length,0);
@@ -670,7 +555,7 @@ for(const detailed of [false,true])for(const graphics of ['integrated','dedicate
       const state=p.snapshot();
       assert.deepEqual(plain(state.memory.ram.find(item=>item.id==='document')),initial.ram[1],'Rozepsaný dokument zůstává');
       assert.deepEqual(plain(state.memory.ssd.find(item=>item.id==='program')),initial.ssd[0],'Kód editoru zůstává na SSD');
-      if(state.index<7)assert.ok(!state.memory.ssd.some(item=>item.id==='file'));
+      if(state.index<6)assert.ok(!state.memory.ssd.some(item=>item.id==='file'));
       if(step.id==='save-data')assert.equal(state.memory.ram.find(item=>item.id==='file').label,'poznamky.txt');
       if(step.id==='save-transfer')assert.equal(state.memory.ssd.find(item=>item.id==='file').label,'Čeká na zápis');
       if(graphics==='dedicated')assert.deepEqual(plain(state.memory.vram),[]);
@@ -678,7 +563,7 @@ for(const detailed of [false,true])for(const graphics of ['integrated','dedicate
     }
     const final=plain(p.snapshot());
     assert.equal(p.status,'ended');assert.equal(h.pending.size,0);
-    assert.equal(final.index,8);assert.equal(final.memory.ssd.find(item=>item.id==='file').label,'poznamky.txt');
+    assert.equal(final.index,7);assert.equal(final.memory.ssd.find(item=>item.id==='file').label,'poznamky.txt');
     assert.deepEqual(final.memory.ssd.find(item=>item.id==='file'),final.memory.ram.find(item=>item.id==='file'));
     p.reset();assert.deepEqual(plain(p.snapshot().memory),initial);
     p.play();h.advance(100000);
@@ -690,28 +575,28 @@ for(const detailed of [false,true])for(const graphics of ['integrated','dedicate
 
 test('Zrušení zápisu do flash a přepnutí scénáře nezanechají hotový soubor ani časovač',()=>{
   const h=harness('save'),p=h.player;
-  for(let i=0;i<8;i++)stepForward(p);
+  for(let i=0;i<7;i++)stepForward(p);
   assert.equal(p.snapshot().memory.ssd.find(item=>item.id==='file').label,'Čeká na zápis');
   p.next();h.advance(1200);p.reset();h.advance(10000);
   assert.equal(p.index,-1);assert.equal(h.pending.size,0);
   assert.ok(!p.snapshot().memory.ssd.some(item=>item.id==='file'));
   finishStepping(p);assert.equal(p.snapshot().memory.ssd.find(item=>item.id==='file').label,'poznamky.txt');
   p.select('calculator');assert.ok(!p.snapshot().memory.ssd.some(item=>item.id==='file'));
-  p.select('save',true);assert.equal(p.steps.length,9);
+  p.select('save');assert.equal(p.steps.length,8);
   assert.ok(!p.snapshot().memory.ram.some(item=>item.id==='file'));
   p.play();h.advance(500);p.select('youtube');h.advance(10000);
   assert.equal(p.index,-1);assert.equal(h.pending.size,0);
   assert.ok(!p.snapshot().memory.ssd.some(item=>item.id==='file'));
 });
 
-for(const detailed of [false,true])for(const graphics of ['integrated','dedicated']){
-  test(`Zapnutí/${detailed?'cache':'bez cache'}/${graphics}: firmware, zavaděč a systém navazují až po dokončení`,()=>{
-    const h=harness('boot',detailed,graphics),p=h.player,initial=plain(p.snapshot());
+for(const graphics of ['integrated','dedicated']){
+  test(`Zapnutí/${graphics}: firmware, zavaděč a systém navazují až po dokončení`,()=>{
+    const h=harness('boot',graphics),p=h.player,initial=plain(p.snapshot());
     assert.equal(initial.effects.powered,false);assert.equal(initial.effects.ramReady,false);
     assert.equal(initial.effects.screen,'black');assert.deepEqual(initial.memory.ram,[]);
-    assert.equal(p.steps.length,graphics==='dedicated'?22:18);
+    assert.equal(p.steps.length,graphics==='dedicated'?18:14);
     const complete={
-      'firmware-read':{cpuSoftware:'UEFI'},'hardware-init':{ramReady:true},
+      'firmware-read':{cpuSoftware:'UEFI',ramReady:true},
       'loader-read':{cpuSoftware:'Zavaděč'},'system-read':{cpuSoftware:'Operační systém'},
       ready:{screen:'login',cpuWork:false}
     };
@@ -741,21 +626,21 @@ for(const detailed of [false,true])for(const graphics of ['integrated','dedicate
 }
 
 test('Zrušení inicializace a přepnutí z/do startu obnoví napájení, RAM i software CPU',()=>{
-  const h=harness('boot'),p=h.player;stepForward(p);stepForward(p);
+  const h=harness('boot'),p=h.player;stepForward(p);
   p.next();h.advance(1200);assert.equal(p.snapshot().effects.ramReady,false);
   p.reset();h.advance(10000);assert.equal(p.snapshot().effects.powered,false);
   assert.equal(p.snapshot().effects.ramReady,false);assert.equal(h.pending.size,0);
   p.select('calculator');assert.equal(p.snapshot().effects.powered,undefined);
   assert.equal(p.snapshot().effects.cpuSoftware,undefined);assert.equal(p.snapshot().effects.screen,'desktop');
-  p.play();h.advance(1200);p.select('boot',true,'dedicated');h.advance(10000);
+  p.play();h.advance(1200);p.select('boot','dedicated');h.advance(10000);
   assert.equal(p.status,'ready');assert.equal(p.snapshot().effects.powered,false);
   assert.deepEqual(plain(p.snapshot().memory.ram),[]);assert.deepEqual(plain(p.snapshot().memory.vram),[]);
   assert.equal(h.pending.size,0);
 });
 
-test('RAM ve všech 16 variantách ukazuje nejvýše jeden aktuální obsah a obnoví ho po resetu',()=>{
-  for(const scenario of scenarios)for(const detailed of [false,true])for(const graphics of ['integrated','dedicated']){
-    const h=harness(scenario.id,detailed,graphics),p=h.player,initial=plain(p.snapshot().displayMemory);
+test('RAM ve všech 8 variantách ukazuje nejvýše jeden aktuální obsah a obnoví ho po resetu',()=>{
+  for(const scenario of scenarios)for(const graphics of ['integrated','dedicated']){
+    const h=harness(scenario.id,graphics),p=h.player,initial=plain(p.snapshot().displayMemory);
     const check=state=>{
       assert.ok(state.displayMemory.ram.length<=1);
       for(const displayed of state.displayMemory.ram)for(const id of displayed.id.split('+')){
@@ -778,8 +663,8 @@ test('RAM ve všech 16 variantách ukazuje nejvýše jeden aktuální obsah a ob
 });
 
 test('Kalkulačka nahradí požadavek až dojezdem kódu a při čtení vybere podklady místo starých příkazů',()=>{
-  for(const detailed of [false,true])for(const graphics of ['integrated','dedicated']){
-    const h=harness('calculator',detailed,graphics),p=h.player;
+  for(const graphics of ['integrated','dedicated']){
+    const h=harness('calculator',graphics),p=h.player;
     while(p.steps[p.index+1].id!=='load')stepForward(p);
     assert.equal(p.snapshot().displayMemory.ram[0].id,'request');
     p.next();h.advance(1000);p.pause();
@@ -790,7 +675,7 @@ test('Kalkulačka nahradí požadavek až dojezdem kódu a při čtení vybere p
     while(p.status!=='ended'){
       stepForward(p);const s=p.snapshot();
       if(s.step.id==='graphics-commands-read')assert.equal(s.displayMemory.ram[0].id,'commands');
-      if(s.step.id==='graphics-upload'||(detailed&&s.step.id==='draw'))assert.equal(s.displayMemory.ram[0].id,'image');
+      if(s.step.id==='graphics-upload')assert.equal(s.displayMemory.ram[0].id,'image');
       assert.ok(!s.displayMemory.ram.some(item=>item.id==='request'));
     }
     const state=p.snapshot(),actual=plain(state.memory.ram);
@@ -800,38 +685,69 @@ test('Kalkulačka nahradí požadavek až dojezdem kódu a při čtení vybere p
 });
 
 test('Video vybere příkazy, obraz a zvuk podle práce a při příjmu dalších částí obnoví aktuální obsah',()=>{
-  for(const detailed of [false,true])for(const graphics of ['integrated','dedicated']){
-    const h=harness('youtube',detailed,graphics),p=h.player;
+  for(const graphics of ['integrated','dedicated']){
+    const h=harness('youtube',graphics),p=h.player;
     for(let i=0;i<p.steps.length;i++){
       stepForward(p);const s=p.snapshot();
       if(s.step.id==='buffer')assert.equal(s.displayMemory.ram[0].id,'received');
-      if(s.step.id==='video-commands-read'||s.step.id==='graphics-commands-read')assert.equal(s.displayMemory.ram[0].id,'commands');
+      if(s.step.id==='graphics-commands-read')assert.equal(s.displayMemory.ram[0].id,'commands');
       if(s.step.id==='graphics-upload')assert.equal(s.displayMemory.ram[0].label,'Video');
       if(s.step.id==='audio-read')assert.equal(s.displayMemory.ram[0].label,'Zvukové vzorky');
     }
     finishStepping(p);
-    assert.equal(p.snapshot().displayMemory.ram[0].label,detailed?'Zvukové vzorky':'Video a zvuk (části 1–3)');
+    assert.equal(p.snapshot().displayMemory.ram[0].label,'Video a zvuk (části 1–3)');
     assert.ok(p.snapshot().memory.ram.some(item=>item.id==='program'));
     assert.ok(p.snapshot().memory.ram.some(item=>item.id==='prepared'));
   }
 });
 
 test('Ukládání vrátí do náhledu RAM soubor po čtení požadavku; start nahradí zavaděč částmi systému',()=>{
-  for(const detailed of [false,true])for(const graphics of ['integrated','dedicated']){
-    const save=harness('save',detailed,graphics).player;
+  for(const graphics of ['integrated','dedicated']){
+    const save=harness('save',graphics).player;
     assert.equal(save.snapshot().displayMemory.ram[0].id,'document');
     while(save.status!=='ended'){
       stepForward(save);const s=save.snapshot();
       if(s.step.id==='save-request-read')assert.equal(s.displayMemory.ram[0].id,'request');
       if(['save-transfer','save-flash'].includes(s.step.id))assert.equal(s.displayMemory.ram[0].label,'poznamky.txt');
     }
-    const boot=harness('boot',detailed,graphics).player;
+    const boot=harness('boot',graphics).player;
     while(boot.status!=='ended'){
       stepForward(boot);const s=boot.snapshot();
       if(s.step.id==='loader-load')assert.equal(s.displayMemory.ram[0].id,'loader');
-      if(s.step.id==='system-load'||s.step.id==='system-start')assert.equal(s.displayMemory.ram[0].id,'system');
+      if(s.step.id==='system-load'||s.step.id==='system-read')assert.equal(s.displayMemory.ram[0].id,'system');
     }
     assert.ok(boot.snapshot().memory.ram.some(item=>item.id==='loader'));
     boot.select('calculator');assert.deepEqual(plain(boot.snapshot().displayMemory.ram),[]);
+  }
+});
+
+test('Ventilátor sdílí čas přenosů: navazuje mezi kroky, stojí při pauze a reset startu ho zastaví',()=>{
+  for(const scenario of scenarios)for(const graphics of ['integrated','dedicated']){
+    const h=harness(scenario.id,graphics),p=h.player;
+    const initial=plain(coolingMotion(p.snapshot()));
+    assert.equal(initial.powered,scenario.id!=='boot');
+    assert.equal(initial.angle,0);
+    p.play();h.advance(600);
+    const moving=plain(coolingMotion(p.snapshot()));
+    assert.equal(moving.powered,true);
+    assert.notEqual(moving.angle,initial.angle);
+    p.pause();h.advance(1000);
+    assert.deepEqual(plain(coolingMotion(p.snapshot())),moving,'Pauza zastaví ventilátor');
+    assert.equal(h.pending.size,0,'Chlazení si nedrží vlastní časovač');
+    p.play();
+    assert.deepEqual(plain(coolingMotion(p.snapshot())),moving,'Pokračování nenastavuje polohu znovu');
+    stepForward(p);
+    const boundary=plain(coolingMotion(p.snapshot()));
+    p.next();
+    assert.deepEqual(plain(coolingMotion(p.snapshot())),boundary,'Nový krok plynule navazuje');
+    finishStepping(p);
+    const stepped=plain(coolingMotion(p.snapshot()));
+    p.reset();assert.deepEqual(plain(coolingMotion(p.snapshot())),initial);
+    p.play();h.advance(200000);
+    assert.equal(p.status,'ended');
+    assert.deepEqual(plain(coolingMotion(p.snapshot())),stepped,'Automatika a krokování mají stejnou polohu');
+    p.select('boot');
+    assert.equal(coolingMotion(p.snapshot()).powered,false);
+    assert.equal(coolingMotion(p.snapshot()).angle,0);
   }
 });

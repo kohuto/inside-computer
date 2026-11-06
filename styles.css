@@ -79,7 +79,7 @@ legend {
 
 .settings {
   display: grid;
-  grid-template-columns: minmax(0,2.4fr) minmax(170px,1fr) minmax(205px,1.1fr);
+  grid-template-columns: minmax(0,1fr);
   align-items: start;
   gap: 24px
 }
@@ -181,7 +181,7 @@ legend {
   gap: 12px 26px
 }
 
-.explanation-toggle,.setting-toggle {
+.explanation-toggle {
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -191,7 +191,7 @@ legend {
   position: relative
 }
 
-.explanation-toggle input,.setting-toggle input {
+.explanation-toggle input {
   position: absolute;
   opacity: 0;
   width: 1px;
@@ -216,21 +216,68 @@ legend {
   background: white
 }
 
-.explanation-toggle input:checked+.switch,.setting-toggle input:checked+.switch {
+.explanation-toggle input:checked+.switch {
   background: var(--blue)
 }
 
-.explanation-toggle input:checked+.switch:after,.setting-toggle input:checked+.switch:after {
+.explanation-toggle input:checked+.switch:after {
   transform: translateX(13px)
 }
 
-.detail-picker,.graphics-picker {
-  align-self: center
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap
 }
 
-.setting-toggle {
-  min-height: 44px;
-  font-size: 14px
+.graphics-picker {
+  display: inline-grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #edf1f7
+}
+
+.graphics-choice {
+  position: relative;
+  cursor: pointer
+}
+
+.graphics-choice input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px
+}
+
+.graphics-choice span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 20px
+}
+
+.graphics-choice:hover span {
+  background: #e2e8f1
+}
+
+.graphics-choice input:checked+span {
+  background: #fff;
+  color: var(--blue);
+  box-shadow: 0 1px 4px #2033531a
 }
 
 .lab {
@@ -247,10 +294,19 @@ legend {
 .lab-heading {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
   padding: 20px 24px 8px
+}
+
+.scenario-heading {
+  display: flex;
+  flex: 1 1 280px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0
 }
 
 #scenario-title {
@@ -498,6 +554,31 @@ g.component-psu .node-label,g.component-outlet .node-label {
   opacity: .5
 }
 
+/* Jednoduchý ventilátor používá stejný čas jako datové přenosy. */
+.cooler-fan-ring {
+  fill: #e2ebf0;
+  stroke: #a5b9c6;
+  stroke-width: 1
+}
+
+.cooler-blade {
+  fill: #7b9bab
+}
+
+.cooler-fan-hub {
+  fill: #526f81
+}
+
+.cooling-label {
+  fill: #5b7080;
+  font-size: 16px;
+  font-weight: 600
+}
+
+.computer-off #cooling-fan {
+  opacity: .5
+}
+
 .computer-off .diagram-node:not(.component-psu):not(.component-outlet):not(.component-powerbutton)>:is(.node-box,.node-icon),
 .computer-off :is(#base-routes,#gpu-card,#integrated-note) {
   opacity: .5
@@ -604,12 +685,21 @@ g.component-psu .node-label,g.component-outlet .node-label {
 }
 
 .component-uefi .node-box {
-  fill: #f1f3f8;
-  stroke: #c7d0df
+  fill: #f6f7fa;
+  stroke: #d7deea
 }
 
-.component-uefi .node-label,.component-ssd .node-label {
+.component-ssd .node-label {
   font-size: 22px
+}
+
+.component-uefi .node-label {
+  font-size: 17px;
+  font-weight: 600
+}
+
+.component-uefi:not(.active) .node-label {
+  fill: #6b7b91
 }
 
 .gpu-card-box {
@@ -641,6 +731,16 @@ g.component-psu .node-label,g.component-outlet .node-label {
   stroke: #86a3dc
 }
 
+.component-uefi:not(.active) .memory-item rect {
+  fill: #f7f8fb;
+  stroke: #d2dae3
+}
+
+.component-uefi:not(.active) .memory-item text {
+  fill: #63728a;
+  font-weight: 550
+}
+
 .memory-placeholder rect {
   fill: #f8fafb;
   stroke: #bacbd2;
@@ -650,33 +750,6 @@ g.component-psu .node-label,g.component-outlet .node-label {
 .memory-empty {
   fill: #586d7d;
   font-weight: 500
-}
-
-.node-inner {
-  fill: #e8edf5;
-  stroke: #d5ddea;
-  stroke-width: 1
-}
-
-.inner-label {
-  fill: #51627e;
-  font-size: 18px;
-  font-weight: 600
-}
-
-.inner-sub {
-  fill: #5c6e88;
-  font-size: 12px
-}
-
-.cache-active .cache-box,.registers-active .registers-box {
-  fill: #eee7ff;
-  stroke: #9679ce;
-  stroke-width: 1.5
-}
-
-.cache-active .cache-label,.registers-active .registers-label {
-  fill: #6442a1
 }
 
 .route-base {
@@ -787,7 +860,7 @@ g.component-psu .node-label,g.component-outlet .node-label {
 
 @media(min-width:1500px) {
   .workspace {
-    --diagram-reserve: 300px;
+    --diagram-reserve: 324px;
     gap: 22px
   }
   .settings {
@@ -859,9 +932,6 @@ g.component-psu .node-label,g.component-outlet .node-label {
   .workspace {
     --diagram-reserve: 345px
   }
-  .settings {
-    grid-template-columns: minmax(0,1fr) minmax(0,1fr)
-  }
   .scenario-picker {
     grid-column: 1 / -1
   }
@@ -905,9 +975,6 @@ g.component-psu .node-label,g.component-outlet .node-label {
 @media(min-width:1151px) and (max-width:1499px) {
   .workspace {
     --diagram-reserve: 300px
-  }
-  #scenario-options {
-    grid-template-columns: repeat(2,minmax(0,1fr))
   }
   .scenario-card {
     padding: 10px;
@@ -957,12 +1024,6 @@ g.component-psu .node-label,g.component-outlet .node-label {
 }
 
 @media(max-width:740px) {
-  .settings {
-    grid-template-columns: minmax(0,1fr) minmax(0,1fr)
-  }
-  .scenario-picker {
-    grid-column: 1 / -1
-  }
   .workspace {
     --diagram-reserve: 345px
   }
@@ -1012,7 +1073,9 @@ g.component-psu .node-label,g.component-outlet .node-label {
     font-size: 19px
   }
   .playback-controls {
-    gap: 8px
+    gap: 8px;
+    margin-left: 0;
+    justify-content: flex-start
   }
   .playback-controls button {
     font-size: 12px

@@ -1,7 +1,6 @@
 /* Každý scénář je jen obsah a stav schématu. O čas i vykreslení se starají jiné soubory.
    effects se dědí mezi kroky, active/flows platí pouze pro aktuální krok.
-   memoryWrites mění zobrazený obsah paměti až po dokončení přenosu.
-   Podrobná varianta rozvádí tentýž příběh, který základní režim místy shrnuje. */
+   memoryWrites mění zobrazený obsah paměti až po dokončení přenosu. */
 window.HWLab = window.HWLab || {};
 (function (Lab) {
   'use strict';
@@ -15,230 +14,89 @@ window.HWLab = window.HWLab || {};
   const focus = (ids,label) => ({ids,...(label ? {label} : {})});
   const withRamFocus = (steps,focuses) => steps.map(s => focuses[s.id] ? {...s,ramFocus:focuses[s.id]} : s);
 
-  const click = () => step('click', 'Kliknutí je vstup pro počítač',
-    'Myš odešle informaci o kliknutí. Procesor zpracuje instrukce, které na tento vstup navazují.',
-    ['mouse', 'cpu'], [flow('mouseCpu', 'control', 'vstup z myši')], { clicked: true });
-  const cpuDetail = (prefix, context) => [
-    step(prefix + '-cache', 'Blízká data v cache procesoru',
-      context + ' Potřebné instrukce a často používaná data z RAM se průběžně dostávají do malé, rychlé cache uvnitř CPU.',
-      ['ram', 'cpu', 'cache'], [flow('ramCache', 'control', 'instrukce a data')], { cpuWork: true }),
-    step(prefix + '-registers', 'Registry drží právě používané hodnoty',
-    'Při vykonávání instrukcí CPU pracuje s jednotlivými hodnotami a adresami v registrech. Do registru se nenačítá celý program.',
-      ['cpu', 'cache', 'registers'], [flow('cacheRegisters', 'control', null)], {}, 3200)
-  ];
-
-  // Stejně jako u síťové části: příprava požadavku, oznámení zařízení,
-  // načtení požadavku a teprve poté přenos obsahu a oznámení dokončení.
-  const calcRequest = () => [
-    step('read-request-write', 'CPU připraví požadavek v RAM',
-      'CPU zapíše do RAM požadavek na načtení kalkulačky z SSD. Určí, které části kódu a dat načíst a kam je v RAM uložit.',
-      ['cpu', 'ram'], [flow('ramCpu', 'control', 'Požadavek na načtení', true)], { cpuWork: true }, 3100),
-    step('read-request', 'CPU oznámí SSD nový požadavek',
-      'CPU oznámí řadiči SSD, že je v RAM připravený nový požadavek. Samotný příkaz si SSD načte z paměti.',
-      ['cpu', 'ssd'], [flow('cpuSsd', 'control', 'Oznámení nového požadavku')]),
-    step('read-request-read', 'SSD načte požadavek z RAM',
-      'Řadič SSD načte z RAM připravený příkaz. Získá tak údaje o požadovaném obsahu a jeho cílovém umístění v RAM.',
-      ['ram', 'ssd'], [flow('ssdRam', 'control', 'Požadavek na načtení', true)])
-  ];
-  const calcLoad = detailed => step('load', 'Ze SSD do pracovní paměti',
-    detailed
-      ? 'Řadiče přenesou potřebný kód a data z SSD do RAM pomocí DMA (přímého přístupu do paměti). Výpočetní jádra CPU nemusí jednotlivé bajty kopírovat.'
-      : 'Řadiče přenesou potřebný kód a data z SSD do RAM, kde budou dostupné pro běh programu. CPU nemusí jednotlivé bajty kopírovat.',
-    ['ssd', 'ram'], [flow('ssdRam', 'data', 'Kód a data')], { ramLoaded: true }, 3500);
-  const calcLoaded = () => step('read-complete', 'SSD oznámí dokončení načítání',
-    'Řadič SSD oznámí CPU, že byl přenos dokončen. Kód a data už jsou v RAM; oznámení tento obsah znovu nepřenáší.',
-    ['ssd', 'cpu'], [flow('cpuSsd', 'control', 'Oznámení dokončení', true)]);
-  const calcRun = detailed => [
-    step('execute', 'CPU načítá instrukce kalkulačky',
-      detailed
-        ? 'CPU vykonává instrukce kalkulačky; pokud nejsou v cache, doplní se z RAM. Ne každá instrukce proto vyžaduje nový přenos z RAM.'
-        : 'Z RAM se do CPU podle potřeby načítají instrukce kalkulačky. CPU je vykonává a připravuje spuštění aplikace.',
-      ['cpu', 'ram', ...(detailed ? ['cache'] : [])], [flow('ramCpu', 'control', 'instrukce programu')], { cpuWork: true }, 3200),
-    step('read-data', 'CPU čte pracovní data',
-      detailed
-        ? 'CPU čte také pracovní data, například údaje o připravovaném okně; často je získá už z cache. Jednotlivé právě používané hodnoty zpracovává v registrech.'
-        : 'CPU čte z RAM také pracovní data, například údaje o připravovaném okně. Načtené instrukce určují, jak s těmito daty pracovat.',
-      ['cpu', 'ram', ...(detailed ? ['cache', 'registers'] : [])], [flow('ramCpu', 'data', 'čtení dat')], {}, 3200),
-    step('write-data', 'CPU připraví podklady pro obraz v RAM',
-      detailed
-        ? 'CPU připraví údaje pro obraz okna a zapíše je do RAM; zápisy mohou nejprve čekat v cache. Příkazy pro grafickou část připraví v následujícím kroku.'
-        : 'CPU zapíše do RAM připravené podklady pro obraz okna kalkulačky. V následujícím kroku připraví příkazy pro grafickou část.',
-      ['cpu', 'ram', ...(detailed ? ['cache'] : [])], [flow('ramCpu', 'data', 'Připravené podklady pro obraz', true)], {}, 3200)
-  ];
-  const calcGraphics = () => [
-    step('graphics-commands-write', 'CPU zapíše příkazy vykreslení do RAM',
-      'CPU uloží do RAM příkazy pro vykreslení okna kalkulačky. Ty určují požadovanou práci a umístění obrazových podkladů.',
-      ['cpu', 'ram'], [flow('ramCpu', 'control', 'Příkazy vykreslení', true)]),
-    step('graphics-request', 'CPU oznámí grafické části novou práci',
-      'CPU oznámí grafické části, že jsou v RAM připravené nové příkazy. Jejich obsah i obrazové podklady si grafická část načte z paměti.',
-      ['cpu', 'gpu'], [flow('cpuGpu', 'control', 'Oznámení nové práce')]),
-    step('graphics-commands-read', 'Grafická část načte příkazy z RAM',
-      'Grafická část převezme z RAM příkazy vykreslení. Získá tak také údaje o umístění připravených obrazových podkladů.',
-      ['ram', 'gpu'], [flow('ramGpu', 'control', 'Příkazy vykreslení')]),
-    step('draw', 'Grafická část načítá podklady z RAM',
-      'Podle načtených příkazů grafická část převezme ze společné RAM obrazové podklady a připraví obraz okna. Načtení příkazů a samotných podkladů ukazujeme odděleně.',
-      ['ram', 'gpu'], [flow('ramGpu', 'data', 'Podklady pro obraz')], { screen: 'loading' }, 3500)
-  ];
-  const calcReady = () => step('ready', 'Kalkulačka je připravená',
-    'Grafická část posílá obraz do monitoru. Okno kalkulačky je zobrazené a připravené k použití.',
-    ['gpu', 'monitor'], [flow('gpuMonitor', 'output', 'Obrazový signál')], { screen: 'calculator', cpuWork: false }, 2700);
-
-  const calc = detailed => [click(), ...calcRequest(), calcLoad(detailed), calcLoaded(),
-    ...(detailed ? cpuDetail('calculator', 'Teď už jsou v RAM i potřebné části kalkulačky.') : []),
-    ...calcRun(detailed), ...calcGraphics(), calcReady()];
-
-  // Základní příběh má 18 postupných přenosů. Cache a registry pouze rozvádějí
-  // práci CPU s vybranými údaji; proud komprimovaného videa jimi nevedeme.
-  const youtube = detailed => [
-    step('play-click', 'Kliknutí na Přehrát',
-      'Myš odešle informaci o kliknutí na Přehrát. CPU vykoná instrukce, které na tento vstup navazují.',
-      ['mouse', 'cpu'], [flow('mouseCpu', 'control', 'Kliknutí na Přehrát')], { clicked: true }),
-    step('request-write', 'CPU připraví požadavek v RAM',
-      'CPU zapíše do RAM údaje požadavku na video. Síťové rozhraní si je odtud bude moci načíst.',
-      ['cpu', 'ram'], [flow('ramCpu', 'control', 'Požadavek na video', true)], { cpuWork: true }),
-    step('request-notify', 'CPU oznámí nový požadavek',
-      'CPU oznámí síťovému rozhraní, že je v RAM připravený nový požadavek. Samotné údaje požadavku zůstávají v paměti.',
-      ['cpu', 'network'], [flow('cpuNetwork', 'control', 'Oznámení nového požadavku')]),
-    step('request-read', 'Síťová část načte požadavek z RAM',
-      'Síťové rozhraní načte připravené údaje požadavku z RAM. Přenos obsahu z paměti je oddělený od předchozího oznámení CPU.',
-      ['ram', 'network'], [flow('networkRam', 'control', 'Požadavek na video', true)]),
-    step('request-server', 'Požadavek putuje na server',
-      'Síťové rozhraní odešle požadavek přes internet na vzdálený server. Ten může začít posílat multimediální obsah po částech.',
-      ['network', 'server'], [flow('networkServer', 'control', 'Požadavek na video')]),
-    step('receive', 'Server posílá video a zvuk',
-      'Server odešle první část komprimovaného videa a zvuku. Síťové rozhraní přijímá jen část pro začátek přehrávání, nikoli celé video.',
-      ['server', 'network'], [flow('serverNetwork', 'data', 'Video a zvuk')], {}, 3300),
-    step('buffer', 'Přijatý obsah se uloží do RAM',
-      'Síťové rozhraní přenese přijatá data do vyrovnávací paměti v RAM. CPU nemusí jednotlivé bajty tohoto přenosu kopírovat.',
-      ['network', 'ram'], [flow('networkRam', 'data', 'Video a zvuk')], { buffer: 2 }, 3300),
-    step('receive-notify', 'Síťová část oznámí přijetí dat',
-      'Síťové rozhraní oznámí CPU, že jsou nová data dostupná v RAM. Oznámení je krátká řídicí informace, nikoli celý přijatý obsah.',
-      ['network', 'cpu'], [flow('cpuNetwork', 'control', 'Oznámení přijatých dat', true)]),
-    step('received-read', 'CPU načte potřebná přijatá data',
-      'CPU zpracuje přijatý síťový obsah včetně dešifrování, připraví video a dekóduje zvuk. Dekódování obrazu zůstává úkolem grafické části.',
-      ['ram', 'cpu'], [flow('ramCpu', 'data', 'Přijatá data')], { cpuWork: true }, 3300),
-    ...(detailed ? cpuDetail('playback', 'CPU připravuje přijatý obsah k přehrávání; obraz později dekóduje grafická část.') : []),
-    step('playback-write', 'CPU připraví data přehrávání v RAM',
-      detailed
-        ? 'CPU zapíše do RAM připravené video a zvukové vzorky; zápisy mohou nejprve čekat v cache. Obrazová data zůstávají komprimovaná pro grafický videodekodér.'
-        : 'CPU zapíše do RAM zpracovaný zvuk a údaje pro přehrávání. Video zatím zůstává komprimované a bude je dekódovat grafická část.',
-      ['cpu', 'ram', ...(detailed ? ['cache'] : [])], [flow('ramCpu', 'data', 'Připravená data přehrávání', true)], {}, 3300),
-    step('video-commands-write', 'CPU zapíše příkazy pro grafickou část',
-      'CPU uloží do RAM příkazy určující zpracování videa a umístění jeho dat. Jde o příkazy pro grafický hardware.',
-      ['cpu', 'ram'], [flow('ramCpu', 'control', 'Příkazy zpracování videa', true)]),
-    step('graphics-notify', 'CPU oznámí grafické části novou práci',
-      'CPU oznámí grafické části, že jsou v RAM připravené nové příkazy. Jejich obsah i video si grafická část načte z paměti.',
-      ['cpu', 'gpu'], [flow('cpuGpu', 'control', 'Oznámení nové práce')]),
-    step('video-commands-read', 'Grafická část načte příkazy z RAM',
-      'Grafická část převezme z RAM příkazy zpracování videa. Získá tak také údaje o umístění připraveného obsahu.',
-      ['ram', 'gpu'], [flow('ramGpu', 'control', 'Příkazy zpracování videa')]),
-    step('video-read', 'Grafická část načte a dekóduje video',
-      'Specializovaný videodekodér grafické části načte komprimované video ze společné RAM a připraví obrazové snímky. Obsah videa nemusí procházet výpočetními jádry CPU.',
-      ['ram', 'gpu'], [flow('ramGpu', 'data', 'Video')], { buffer: 2 }, 3300),
-    step('audio-setup', 'CPU nastaví zvukové přehrávání',
-      'CPU předá zvukové části nastavení přehrávání a umístění připravených zvukových dat v RAM. Poté si zvuková část může obsah načíst.',
-      ['cpu', 'audio'], [flow('audioCpu', 'control', 'Nastavení přehrávání', true)]),
-    step('audio-read', 'Zvuková část načte zvuk z RAM',
-      'Zvuková část načte z RAM připravená zvuková data. Z nich připraví signál pro zvukový výstup.',
-      ['ram', 'audio'], [flow('ramAudio', 'data', 'Zvuk')]),
-    step('image-output', 'Monitor zobrazí první obraz',
-      'Grafická část odešle obrazový signál monitoru, který zobrazí první připravený snímek. Následuje spuštění odpovídajícího zvukového výstupu.',
-      ['gpu', 'monitor'], [flow('gpuMonitor', 'output', 'Obrazový signál')],
-      { screen: 'video', playback: true, playbackFrom: 0, playbackTo: 0, soundPlaying: false, cpuWork: false }),
-    step('sound-output', 'Obraz a zvuk se přehrávají',
-      'Reproduktory přehrávají zvuk odpovídající obrazu a krátká ukázka se poté zastaví. V reálu mohou mezitím přicházet a zpracovávat se další části; ukázali jsme začátek, nikoli stažení celého videa.',
-      ['audio', 'speakers', 'monitor'], [flow('audioSpeakers', 'output', 'Zvukový signál')],
-      { playbackFrom: 0, playbackTo: 3, soundPlaying: true, buffer: 2 }, 6000)
-  ];
-
-  // Základní režimy obsahují i zvýraznění zpracování bez přenosu. phases jsou části stejného
-  // číslovaného kroku; jejich čas i souběžné přenosy řídí společný přehrávač.
+  // Zpracování CPU shrnují navazující přenosy, bez samostatných čekacích kroků.
+  // phases jsou části stejného číslovaného kroku řízené společným přehrávačem.
   const highlight = (target, label) => ({ target, label });
   const staged = (content, phases) => ({ ...content, phases });
-  const calcBasic = () => [
-    step('click', 'Kliknutí je vstup pro počítač',
-      'Myš odešle informaci o kliknutí na ikonu kalkulačky. CPU vykonává instrukce, které na tento vstup navazují.',
-      ['mouse', 'cpu'], [flow('mouseCpu', 'control', 'Kliknutí na kalkulačku')], { clicked: true }),
+  const calculatorSteps = () => [
+    step('click', 'Kliknutí na ikonu',
+      'Myš předává informace o stisku tlačítka a pohybu přes příslušné rozhraní a ovladače. Operační systém běžící na CPU podle polohy ukazatele vyhodnotí, že uživatel klikl na ikonu kalkulačky, a zahájí její spuštění.',
+      ['mouse', 'cpu'], [flow('mouseCpu', 'control', 'informace o kliknutí')], { clicked: true }),
     step('read-request-write', 'CPU připraví požadavek v RAM',
-      'CPU zapíše do RAM příkaz určující, které části kalkulačky načíst z NVMe SSD a kam je uložit. RAM sama o načtení nežádá.',
+      'Operační systém prostřednictvím ovladače úložiště připraví příkaz ke čtení z NVMe SSD. Ovladač je software, jehož instrukce provádí CPU. Procesor podle nich zapíše příkaz do fronty v RAM. Příkaz určuje, ze kterých bloků SSD načíst potřebný kód a data kalkulačky a do které oblasti RAM je uložit. RAM příkaz pouze uchovává; sama načítání neřídí.',
       ['cpu', 'ram'], [flow('ramCpu', 'control', 'Požadavek na načtení', true)], { cpuWork: true }),
     step('read-request', 'CPU oznámí SSD novou práci',
-      'CPU upozorní řadič SSD na práci připravenou v RAM. Řadič si odtud načte příkaz; tento detail zde samostatně neanimujeme.',
+      'Po připravení příkazu v RAM aktualizuje CPU podle instrukcí ovladače úložiště oznamovací registr řadiče SSD, označovaný jako doorbell. Řadič tak zjistí, že jsou ve frontě připravené nové příkazy. Načte si je z RAM a začne je zpracovávat.',
       ['cpu', 'ssd'], [flow('cpuSsd', 'control', 'Oznámení nové práce')]),
     step('load', 'Kód a data se načtou do RAM',
-      'Řadič SSD přenese potřebný kód a data do RAM pomocí DMA. Výpočetní jádra CPU nemusí jednotlivé bajty kopírovat.',
+      'Řadič SSD podle převzatého příkazu načte požadované bloky a přenese kód a data kalkulačky do určené oblasti RAM pomocí DMA. DMA neboli přímý přístup do paměti umožňuje zařízení přenášet data do RAM nebo z RAM, aniž by výpočetní jádra CPU kopírovala jednotlivé bajty. Po dokončení přenosu řadič zapíše do příslušné fronty v RAM záznam o dokončení. Ovladač úložiště tento záznam zpracuje a operační systém pak může pokračovat ve spouštění kalkulačky.',
       ['ssd', 'ram'], [flow('ssdRam', 'data', 'Kód a data')], { ramLoaded: true }, 3500),
     step('execute', 'CPU načte instrukce a data',
-      'CPU načte z RAM potřebné instrukce kalkulačky a pracovní data. Čtení jejich obsah v RAM nemaže.',
+      'CPU postupně získává instrukce kalkulačky a potřebná pracovní data prostřednictvím paměťové hierarchie. Nejprve je hledá v cache, malé a rychlé paměti uvnitř procesoru. Pokud tam potřebné instrukce nebo data nejsou, doplní se z RAM. Tento krok představuje mnoho průběžných čtení během vykonávání programu; celý program se jednorázově nepřesune dovnitř CPU. Čtení obsah RAM nemaže.',
       ['ram', 'cpu'], [flow('ramCpu', 'data', 'Instrukce a data')], { cpuWork: true }, 3200),
-    { ...step('process', 'CPU zpracovává program',
-      'Procesor vykonává načtené instrukce a pracuje s daty. Připraví podklady a příkazy pro zobrazení okna, které následně zapíše do RAM.',
-      ['cpu'], [], { cpuWork: true }, 3800),
-      highlights: [highlight('cpu', 'Zpracování')] },
     step('write-data', 'CPU zapíše podklady a příkazy',
-      'CPU uloží do RAM připravené obrazové podklady i vykreslovací příkazy. Grafická část je bude moci načíst z paměti.',
+      'CPU vykonává instrukce kalkulačky, grafických knihoven a ovladačů. Tyto softwarové části připraví obrazové podklady a vykreslovací příkazy pro GPU, které CPU zapíše do RAM. Vykreslovací příkazy určují práci grafického hardwaru; nejde o přeposlání instrukcí kalkulačky, které vykonává CPU. Grafická část si připravené podklady a příkazy následně načte z paměti.',
       ['cpu', 'ram'], [flow('ramCpu', 'data', 'Podklady a příkazy', true)], {}, 3200),
     step('graphics-request', 'CPU oznámí grafické části novou práci',
-      'CPU oznámí dostupnost připravené práce. Podklady a vykreslovací příkazy zůstávají v RAM, odkud si je grafická část načte.',
+      'CPU podle instrukcí grafického ovladače a operačního systému předá GPU požadavek na zpracování připravené dávky vykreslovacích příkazů. Ovladač a systém správy GPU zajistí zařazení práce do fronty a potřebnou synchronizaci s předchozími operacemi. Konkrétní způsob předání závisí na grafickém hardwaru a ovladači. Samotné příkazy a obrazové podklady si GPU načte z RAM.',
       ['cpu', 'gpu'], [flow('cpuGpu', 'control', 'Oznámení nové práce')]),
     step('draw', 'Grafická část načte podklady a příkazy',
-      'Grafická část načte ze společné RAM podklady i příkazy a připraví obraz okna. Čtení jejich obsah v RAM nemaže.',
+      'Integrovaná grafika využívá společnou operační paměť RAM, ze které GPU načte vykreslovací příkazy a obrazové podklady. Vykreslovací jednotky GPU podle příkazů zpracují podklady a zapíšou výsledné pixely obrazu okna do obrazové paměťové plochy v RAM. Ve Windows správce oken DWM s využitím GPU skládá obrazy jednotlivých oken do výsledného obrazu pracovní plochy. Tento krok tedy zahrnuje čtení i zápisy obrazových dat v paměti; samotné čtení původní podklady nemaže.',
       ['ram', 'gpu'], [flow('ramGpu', 'data', 'Podklady a příkazy')], { screen: 'loading' }, 3500),
+    step('display-signal', 'Grafická část posílá obrazový signál',
+      'Zobrazovací část grafického hardwaru čte připravený obraz z paměti a odesílá jej monitoru jako obrazový signál.',
+      ['gpu', 'monitor'], [flow('gpuMonitor', 'output', 'Obrazový signál')], { cpuWork: false }, 2900),
     step('ready', 'Kalkulačka se zobrazí na monitoru',
-      'Grafická část odešle obrazový signál monitoru. Na monitoru se zobrazí kalkulačka připravená k použití.',
-      ['gpu', 'monitor'], [flow('gpuMonitor', 'output', 'Obrazový signál')], { screen: 'calculator', cpuWork: false }, 2900)
+      'Monitor přijal obrazový signál a zobrazí kalkulačku připravenou k použití.',
+      ['monitor'], [], { screen: 'calculator' }, 1800)
   ];
 
-  const youtubeBasic = () => {
+  const youtubeSteps = () => {
     const outputs = [flow('gpuMonitor', 'output', 'Obrazový signál'), flow('audioSpeakers', 'output', 'Zvukový signál')];
     const playing = ['gpu', 'audio', 'monitor', 'speakers'];
     return [
       step('play-click', 'Kliknutí na Přehrát',
-        'YouTube už je otevřený. Myš odešle CPU informaci o kliknutí na Přehrát.',
+        'Myš předává údaje o pohybu a stisku tlačítka přes příslušné rozhraní a ovladače. Operační systém a prohlížeč běžící na CPU podle polohy ukazatele vyhodnotí kliknutí na tlačítko Přehrát a zahájí přehrávání.',
         ['mouse', 'cpu'], [flow('mouseCpu', 'control', 'Kliknutí na Přehrát')], { clicked: true }),
       step('request-write', 'CPU připraví požadavek v RAM',
-        'CPU zapíše do RAM požadavek na potřebný úsek videa. Síťová část si jej odtud bude moci načíst.',
+        'Prohlížeč běžící na CPU vytvoří síťový požadavek na potřebný úsek videa. Síťový software připraví odesílaná data a ovladač síťového zařízení zapíše do odesílací fronty v RAM záznamy s jejich umístěním a délkou. Síťový řadič podle těchto záznamů převezme data k odeslání; význam požadavku na video řeší prohlížeč.',
         ['cpu', 'ram'], [flow('ramCpu', 'control', 'Požadavek na video', true)], { cpuWork: true }),
       step('request-notify', 'CPU oznámí síťové části novou práci',
-        'CPU upozorní síťovou část na požadavek připravený v RAM. Síťová část si jej odtud načte; tento detail zde samostatně neanimujeme.',
+        'CPU podle instrukcí síťového ovladače oznámí řadiči, že jsou v odesílací frontě nové položky. Ovladač zajistí, aby byly záznamy i data dostupné zařízení; konkrétní způsob oznámení závisí na řadiči. Ten podle záznamů načte připravená data z RAM, obvykle pomocí DMA.',
         ['cpu', 'network'], [flow('cpuNetwork', 'control', 'Oznámení nové práce')]),
       step('request-server', 'Požadavek putuje na server',
-        'Síťová část odešle požadavek přes internet na vzdálený server. Potřebný úsek videa se teprve stáhne.',
+        'Síťový řadič vyšle připravená data přes síťové rozhraní. Požadavek putuje přes místní síť a další síťová zařízení k serveru poskytujícímu obsah. Přípravu webového požadavku a zabezpečeného spojení řídí software vykonávaný CPU; síťový řadič zajišťuje přenos na místní síť.',
         ['network', 'server'], [flow('networkServer', 'control', 'Požadavek na video')]),
       step('receive', 'Server posílá video a zvuk',
-        'Server posílá první část obsahu videa a zvuku. Přijatý obsah ještě není připravený přímo pro monitor a reproduktory.',
+        'Server odešle požadované části komprimovaného videa a zvuku prostřednictvím zabezpečeného spojení. Obsah přichází po síťových paketech; obrazová a zvuková stopa mohou být stahovány odděleně. Přijatá data musí projít síťovým zpracováním a dekódováním, než z nich vzniknou obrazové snímky a zvukové vzorky.',
         ['server', 'network'], [flow('serverNetwork', 'data', 'Video a zvuk')], {}, 3300),
       step('buffer', 'Síťová část zapíše data do RAM',
-        'Síťová část uloží přijatý obsah do vyrovnávací paměti v RAM pomocí DMA. Přenos neprochází výpočetními jádry CPU.',
+        'Síťový řadič zapisuje přijaté pakety pomocí DMA do příjmových bufferů v RAM, které předem připravil ovladač. DMA neboli přímý přístup do paměti přenáší data bez kopírování jednotlivých bajtů výpočetními jádry CPU. Ovladač a síťový software zpracují oznámení o příjmu a zpřístupní data prohlížeči. Síťové buffery jsou odlišné od paměti, ve které přehrávač uchovává připravené mediální úseky.',
         ['network', 'ram'], [flow('networkRam', 'data', 'Video a zvuk')], { buffer: 2 }, 3300),
       step('received-read', 'CPU načte instrukce a data',
-        'CPU načte z RAM potřebné instrukce prohlížeče a přijatá pracovní data. Čtení jejich obsah v RAM nemaže.',
+        'CPU průběžně provádí instrukce prohlížeče, systému a ovladačů a čte údaje potřebné ke zpracování přijatého obsahu. Instrukce i pracovní data získává přes cache; chybějící obsah se doplňuje z RAM. Tento krok představuje mnoho čtení podle potřeby, nikoli jednorázové načtení celého prohlížeče či videa do CPU. Čtení RAM její obsah nemaže.',
         ['ram', 'cpu'], [flow('ramCpu', 'data', 'Instrukce a data')], { cpuWork: true }, 3200),
-      { ...step('prepare', 'Příprava přehrávání',
-        'CPU zpracuje načtená data včetně dešifrování a dekódování zvuku. Připraví video, zvukové vzorky a příkazy pro následný zápis do RAM.',
-        ['cpu'], [], { cpuWork: true }, 4200),
-        highlights: [highlight('cpu', 'Příprava přehrávání')] },
       step('playback-write', 'CPU zapíše data a příkazy do RAM',
-        'CPU zapíše do RAM připravené video, zvukové vzorky a příkazy. Obrazová data jsou stále komprimovaná, zvuk už má podobu vzorků.',
+        'Síťový a přehrávací software vykonávaný CPU zpracuje přenos včetně dešifrování zabezpečeného spojení a připraví komprimované obrazové a zvukové stopy. Softwarový zvukový dekodér převede zvuk na vzorky; obrazová data zůstanou komprimovaná pro hardwarový videodekodér. CPU zapíše do RAM připravená data a příkazy pro další zpracování. Příkazy pro grafický hardware jsou nové řídicí údaje, nikoli přeposlané instrukce programu CPU.',
         ['cpu', 'ram'], [flow('ramCpu', 'data', 'Data a příkazy', true)], {}, 3200),
       step('graphics-notify', 'CPU oznámí grafické části novou práci',
-        'CPU pouze oznámí připravenou práci. Příkazy i video si grafická část načte z RAM.',
+        'CPU podle instrukcí grafického ovladače a operačního systému předá grafickému hardwaru připravenou dekódovací práci. Ovladač a systém správy GPU zajistí její zařazení a návaznost na předchozí operace. Konkrétní způsob zadání závisí na hardwaru a ovladači; komprimované video a příkazy si zařízení převezme z paměti.',
         ['cpu', 'gpu'], [flow('cpuGpu', 'control', 'Oznámení nové práce')]),
       step('video-read', 'Grafická část načte video a příkazy',
-        'Grafická část převezme z RAM připravené video i příkazy pro jeho zpracování. Čtení data z RAM nemaže.',
+        'Integrovaná grafika sdílí systémovou RAM s CPU. Grafický hardware z ní načítá komprimované video a řídicí údaje pro videodekodér, například parametry snímků a odkazy na potřebné paměťové plochy. Načtený obsah zatím není hotovým obrazem pro monitor; ten vytvoří dekódování. Čtení původní data v RAM nemaže.',
         ['ram', 'gpu'], [flow('ramGpu', 'data', 'Video a příkazy')], {}, 3300),
       { ...step('video-process', 'Grafická část zpracovává video',
-        'Specializovaný videodekodér grafické části dekóduje připravené video. Vznikají obrazové snímky pro monitor.',
+        'Specializovaný videodekodér grafického hardwaru převádí komprimované video na obrazové snímky a zapisuje je do obrazových paměťových ploch v RAM. Snímky se pro zobrazení mohou dále upravit, například změnou barevného formátu nebo velikosti, a složit s webovou stránkou. Krok zahrnuje čtení i zápisy do paměti. Hardwarové dekódování vyžaduje podporu použitého formátu v dekodéru a ovladači.',
         ['gpu'], [], { screen: 'loading' }, 3000),
         highlights: [highlight('gpu', 'Zpracování videa')] },
       step('audio-setup', 'CPU nastaví a spustí zvukovou část',
-        'CPU určí umístění zvukových dat v RAM, jejich formát a spustí přehrávání. Samotné vzorky převezme zvuková část z paměti.',
+        'Zvukový software a ovladač vykonávané CPU nastaví přehrávací formát, například vzorkovací frekvenci a počet kanálů, a zpřístupní zařízení buffer se vzorky v RAM. Ovladač nastaví přenos z paměti a spustí zvukový proud. Zvukový systém může vzorky před předáním hardwaru smíchat s dalšími zvuky nebo upravit jejich formát.',
         ['cpu', 'audio'], [flow('audioCpu', 'control', 'Spuštění přehrávání', true)]),
       step('audio-read', 'Zvuková část načte zvukové vzorky',
-        'Zvuková část načte připravené zvukové vzorky z RAM pomocí DMA. Čtení vzorky z paměti nemaže.',
+        'Řadič zvukového zařízení průběžně čte připravené zvukové vzorky z bufferu v RAM pomocí DMA. Software doplňuje další vzorky podle postupu přehrávání; nejde o jednorázové načtení celého zvuku. Vzorky se ve zvukovém zařízení zpracují a pro analogový výstup převedou na elektrický signál pro reproduktory.',
         ['ram', 'audio'], [flow('ramAudio', 'data', 'Zvukové vzorky')]),
       staged(step('playback', 'Obraz a zvuk se přehrávají souběžně',
-        'Monitor zobrazuje obraz a reproduktory přehrávají odpovídající zvuk. Současně přicházejí další data do RAM; krátká ukázka se pak zastaví.',
+        'Zobrazovací část grafického hardwaru opakovaně čte připravený obraz z paměti a vytváří signál pro monitor. Zvukové zařízení souběžně zpracovává vzorky a vytváří zvukový výstup. Přehrávač časuje obraz a zvuk podle společného časového základu a zohledňuje zpoždění výstupů. Zatím se přijímají další části obsahu; jejich příprava na CPU, dekódování i doplňování bufferů se při pokračujícím přehrávání opakují a překrývají.',
         playing, outputs, { screen: 'video', playback: true, soundPlaying: true, playbackFrom: 0, playbackTo: 3, cpuWork: false }, 10000), [
         { at: 0 },
         { at: .18, active: [...playing, 'server', 'network'], flows: [...outputs, flow('serverNetwork', 'data', 'Video a zvuk')] },
@@ -254,39 +112,31 @@ window.HWLab = window.HWLab || {};
   };
 
   // Editor i rozepsaný dokument už jsou v RAM. Po přenosu čekají data v SSD
-  // na trvalý zápis; hotový soubor přibude až po dokončení devátého kroku.
-  // Cache a registry rozvádíme uvnitř stejných kroků, bez prodloužení příběhu.
-  const saveFile = detailed => withMemory([
+  // na trvalý zápis; hotový soubor přibude až po dokončení posledního kroku.
+  const saveFile = () => withMemory([
     step('save-click', 'Kliknutí na Uložit',
-      'Textový editor je otevřený a dokument je rozepsaný v RAM. Myš odešle CPU informaci o kliknutí na Uložit.',
+      'Myš předává údaje o pohybu a stisku tlačítka přes příslušné rozhraní a ovladače. Operační systém a uživatelské rozhraní editoru běžící na CPU podle polohy ukazatele vyhodnotí kliknutí na Uložit. Editor zahájí ukládání dokumentu; myš sama význam tlačítka nezná.',
       ['mouse','cpu'], [flow('mouseCpu','control','Kliknutí na Uložit')], {clicked:true}),
     step('save-read', 'CPU načte instrukce a data',
-      detailed ? 'CPU získá potřebné instrukce editoru a vybraná pracovní data z RAM do cache. Často používané údaje mohou být v cache už připravené.'
-        : 'CPU načte potřebné instrukce editoru a pracovní data pro uložení dokumentu. Při běhu programu zajišťuje také činnost systému a ovladače.',
-      ['ram','cpu',...(detailed ? ['cache'] : [])], [flow(detailed ? 'ramCache' : 'ramCpu','data','Instrukce a data')], {cpuWork:true}, 3200),
-    {...step('save-prepare', 'CPU připraví soubor k uložení',
-      'CPU připraví obsah dokumentu ve formátu textového souboru poznamky.txt.' + (detailed
-        ? ' Cache uchovává potřebné instrukce a data, registry právě používané adresy a jednotlivé hodnoty.'
-        : ' Připravené bajty souboru následně zapíše do RAM.'),
-      ['cpu',...(detailed ? ['cache','registers'] : [])], [], {}, 3600),
-      highlights:[highlight(detailed ? 'cpuRam' : 'cpu','Příprava souboru')]},
+      'CPU vykonává instrukce editoru a podle potřeby také operačního systému a ovladačů. Instrukce i pracovní data získává průběžně přes paměťovou hierarchii včetně cache; chybějící obsah se doplňuje z RAM. Krok shrnuje mnoho čtení během ukládání, nikoli jednorázový přesun celého programu či dokumentu do CPU. Čtení obsah RAM nemaže.',
+      ['ram','cpu'], [flow('ramCpu','data','Instrukce a data')], {cpuWork:true}, 3200),
     step('save-data', 'CPU zapíše připravená data do RAM',
-      'CPU uloží do RAM připravené bajty souboru poznamky.txt. Rozepsaný dokument zůstává dostupný editoru.',
+      'Editor vykonávaný CPU připraví bajtovou podobu textu podle zvoleného kódování a předá systému požadavek na zápis souboru poznamky.txt s odkazem na data v paměti. Při běžném ukládání systém data nejprve uchová v souborové cache v RAM a na SSD je může zapsat později. Není nutné vždy vytvářet novou kopii celého dokumentu; jeho pracovní podoba zůstává editoru dostupná.',
       ['cpu','ram'], [flow('ramCpu','data','Data souboru',true)], {}, 3200),
     step('save-request', 'CPU připraví požadavek na zápis',
-      'CPU zapíše do RAM požadavek určující umístění zdrojových dat, jejich délku a cílové bloky SSD. Název souboru a jeho umístění řeší systém souborů.',
+      'Systém souborů spravuje název souboru, jeho metadata a přiřazení dat k prostoru úložiště. Při předání zápisu zařízení ovladač úložiště vykonávaný CPU vytvoří příkaz ve frontě v systémové RAM. Příkaz určuje umístění zdrojových dat v paměti, cílové logické bloky NVMe SSD a jejich počet. Konkrétní fyzické umístění ve flash volí řadič SSD; větší zápis se může rozdělit do více příkazů.',
       ['cpu','ram'], [flow('ramCpu','control','Požadavek na zápis',true)]),
     step('save-notify', 'CPU oznámí SSD novou práci',
-      'CPU upozorní řadič SSD na připravenou práci v RAM. Toto oznámení nepřenáší obsah souboru.',
+      'Po připravení příkazu aktualizuje CPU podle instrukcí ovladače oznamovací registr řadiče SSD, označovaný jako doorbell. Řadič tak zjistí, že příkazová fronta obsahuje novou práci. Oznámení samo nepřenáší příkaz ani obsah souboru; ty si řadič převezme z RAM.',
       ['cpu','ssd'], [flow('cpuSsd','control','Oznámení nové práce')]),
     step('save-request-read', 'SSD načte požadavek z RAM',
-      'Řadič SSD si z RAM načte připravený příkaz k zápisu. Zjistí, odkud má data převzít a kam je uložit.',
+      'Řadič SSD načte příkaz z příkazové fronty v systémové RAM. Získá z něj cílový rozsah logických bloků a odkazy na paměťové oblasti se zapisovanými daty. Příkaz a obsah souboru jsou oddělené: nejprve řadič zjistí požadovanou operaci a podle ní zajistí přenos dat. RAM příkaz pouze uchovává, sama zápis neřídí.',
       ['ram','ssd'], [flow('ssdRam','control','Požadavek na zápis',true)]),
     step('save-transfer', 'Data souboru se přenesou do SSD',
-      'Řadič SSD načte data souboru z RAM pomocí DMA. CPU nemusí jednotlivé bajty kopírovat. Přijatá data ještě čekají na trvalý zápis do flash.',
+      'Řadič SSD převezme data z určených oblastí RAM pomocí DMA. DMA neboli přímý přístup do paměti umožňuje zařízení přenášet data bez kopírování jednotlivých bajtů výpočetními jádry CPU. Čtení zdrojová data v RAM nemaže. SSD může přijatá data dočasně uchovat v interním bufferu nebo zapisovací cache; přenos a zápis do flash se mohou překrývat. Samotné převzetí dat ještě nezaručuje trvalé uložení.',
       ['ram','ssd'], [flow('ssdRam','data','Data souboru',true)], {}, 3600),
     {...step('save-flash', 'SSD zapisuje data do flash',
-      'SSD dokončí zápis do trvalé paměti. Po skončení tohoto kroku se v SSD objeví poznamky.txt a jeho kopie zůstane v RAM. Ukázka zde končí dokončeným trvalým zápisem.',
+      'Řadič SSD zapisuje data do NAND flash a spravuje mapování logických bloků na fyzická umístění. Závěr ukázky zahrnuje i zápis potřebných metadat a zajištění trvalosti: systém předá data ze svých bufferů úložišti a podle potřeby vyžádá vyprázdnění jeho zapisovací cache nebo použije zápis s příznakem FUA, který vyžaduje trvalé uložení před potvrzením. Řadič hlásí výsledek příkazu záznamem v dokončovací frontě, který zpracuje ovladač. Potvrzení Uloženo v editoru může přijít dříve; zde končíme až trvalým uložením. Data v RAM mohou dál zůstat dostupná editoru.',
       ['ssd'], [], {cpuWork:false}, 4000), highlights:[highlight('ssd','Zápis do flash')]}
   ], {
     'save-data':ramWrite(item('file','poznamky.txt')),
@@ -296,81 +146,94 @@ window.HWLab = window.HWLab || {};
   });
 
   // Studený start: první instrukce pocházejí z flash, RAM se připraví až poté.
-  // Zavaděč a potřebné části OS načítáme odděleně. Cache nemění počet kroků.
-  const boot = (detailed,graphics) => {
-    const cpuActive = ['cpu',...(detailed ? ['cache','registers'] : [])];
-    const readRoute = detailed ? 'ramCache' : 'ramCpu';
-    const work = (id,title,description,label,effects={}) => ({
-      ...step(id,title,description,cpuActive,[],effects,3400),
-      highlights:[highlight(detailed ? 'cpuRam' : 'cpu',label)]
-    });
+  // Zavaděč a potřebné části OS načítáme odděleně.
+  const boot = (graphics = 'integrated') => {
     const steps = withMemory([
-      {...step('power-on','Stisk vypínače zapne hlavní napájení',
-        'Vypínač dá pokyn řídicím obvodům základní desky, které zapnou hlavní výstupy zdroje. Po ustálení napětí může začít start CPU. Pohotovostní napájení je přítomné už před stiskem.',
+      {...step('power-on','Vypínač zahájí zapnutí hlavního napájení',
+        'Stisk vypínače vyhodnotí řídicí obvody základní desky, napájené z pohotovostní větve zdroje. Signálem PS_ON# zapnou hlavní výstupy zdroje; zdroj po ustálení napětí potvrdí jejich správný stav signálem PWR_OK. Deska dokončí potřebnou posloupnost napájení a resetu, aby mohl začít start CPU. Tlačítko přímo nespíná síťových 230 V.',
         ['powerbutton','psu'],[],{powered:true},3000),highlights:[highlight('power','Zapnutí napájení')]},
-      {...step('firmware-read','CPU začne číst kód firmwaru UEFI',
-        'Po uvolnění resetu CPU čte první instrukce z flash paměti s firmwarem UEFI. RAM ještě není připravená; úvodní kód se proto nemusí nejprve načíst do RAM.',
-        ['uefi','cpu'],[flow('uefiCpu','control','Kód firmwaru')],{cpuWork:true},3300),
-        completionEffects:{cpuSoftware:'UEFI'}},
-      {...work('hardware-init','Firmware připraví hardware',
-        'CPU vykonává firmware, provede základní kontroly a připraví paměťový řadič i RAM. Následně zpřístupní zařízení potřebná pro start, včetně SSD a grafiky. Nejde o test každého bajtu paměti.',
-        'Inicializace hardwaru'),active:[...cpuActive,'ram','ssd','gpu'],completionEffects:{ramReady:true}},
-      work('boot-select','Firmware vybere zavaděč systému',
-        'CPU stále vykonává firmware UEFI. Podle uloženého nastavení vybere spouštěcí položku a zavaděč na SSD. V této ukázce se systém spouští z místního SSD.',
-        'Výběr zavaděče'),
-      step('loader-request','CPU připraví požadavek na zavaděč',
-        'RAM je už připravená. CPU v ní vytvoří požadavek na načtení zavaděče systému z SSD. Používáme stejný zjednodušený model čtení jako v ostatních scénářích.',
-        ['cpu','ram'],[flow('ramCpu','control','Požadavek na načtení',true)]),
-      step('loader-notify','CPU oznámí SSD připravený požadavek',
-        'CPU upozorní řadič SSD na novou práci. Převzetí příkazu a oznámení dokončení pro přehlednost slučujeme s následujícím přenosem zavaděče.',
+      {...step('firmware-read','CPU spustí firmware a připraví hardware',
+        'Po resetu začne CPU vykonávat počáteční kód firmwaru uložený ve flash paměti. Firmware zprovozní paměťový řadič a RAM, provede potřebné kontroly a inicializuje zařízení pro další start. Rané moduly mohou běžet přímo z prostoru flash; další se po zpřístupnění RAM načítají a vykonávají z ní. Krok shrnuje více fází inicializace, nikoli jednorázové načtení celého UEFI do CPU.',
+        ['uefi','cpu'],[flow('uefiCpu','control','Instrukce firmwaru')],{cpuWork:true},3300),
+        completionEffects:{cpuSoftware:'UEFI',ramReady:true}},
+      step('loader-request','Firmware připraví načtení zavaděče',
+        'Správce spouštění UEFI podle uložené konfigurace a pořadí zaváděcích položek vybere program na SSD. Služby firmwaru zjistí, které bloky obsahují jeho soubor. Ovladač NVMe ve firmwaru, jehož instrukce provádí CPU, připraví do fronty v RAM příkaz ke čtení s určením zdrojových bloků a cílové paměti. Operační systém ještě neběží.',
+        ['cpu','ram'],[flow('ramCpu','control','Načíst zavaděč',true)]),
+      step('loader-notify','Ovladač firmwaru oznámí SSD novou práci',
+        'CPU podle instrukcí ovladače firmwaru aktualizuje oznamovací registr řadiče NVMe SSD, označovaný jako doorbell. Řadič tak zjistí, že příkazová fronta obsahuje novou práci, a načte si z RAM příkaz ke čtení. Oznámení samo nepřenáší kód zavaděče.',
         ['cpu','ssd'],[flow('cpuSsd','control','Oznámení nové práce')]),
       step('loader-load','Zavaděč se načte z SSD do RAM',
-        'Řadič SSD přenese kód a data zavaděče do RAM. Původní kopie zůstává na SSD. Zavaděč je malý program, který připraví spuštění operačního systému.',
+        'Řadič SSD přenese požadované bloky do RAM pomocí DMA, tedy přímého přístupu do paměti bez kopírování jednotlivých bajtů výpočetními jádry CPU. Ovladač zpracuje záznam o dokončení. Služby UEFI připraví spustitelný obraz zavaděče v paměti včetně potřebných úprav adres. Soubor na SSD zůstává zachovaný. Zavaděč zde shrnuje i případný řetězec programů, například správce spouštění Windows a následný OS loader.',
         ['ssd','ram'],[flow('ssdRam','data','Zavaděč systému')],{ramLoaded:true},3500),
-      {...step('loader-read','CPU načte instrukce zavaděče',
-        'CPU začne načítat instrukce a data zavaděče z RAM.' + (detailed ? ' Potřebné údaje se dostávají do cache; registry drží jednotlivé právě používané hodnoty.' : ''),
-        ['ram',...cpuActive],[flow(readRoute,'control','Instrukce zavaděče')],{},3200),completionEffects:{cpuSoftware:'Zavaděč'}},
-      work('loader-run','Zavaděč připraví spuštění systému',
-        'CPU nyní vykonává zavaděč. Ten vybere potřebné součásti operačního systému a připraví jejich načtení do RAM.',
-        'Spuštění zavaděče'),
-      step('system-request','CPU připraví požadavek na části systému',
-        'CPU při vykonávání zavaděče připraví v RAM požadavek na potřebné části systému uložené na SSD.',
-        ['cpu','ram'],[flow('ramCpu','control','Požadavek na načtení',true)]),
-      step('system-notify','CPU oznámí SSD další práci',
-        'CPU upozorní SSD na připravené čtení částí operačního systému. Oznámení nepřenáší samotný kód systému.',
+      {...step('loader-read','Firmware předá řízení zavaděči',
+        'UEFI zahájí vykonávání načteného programu na jeho vstupním bodu. CPU průběžně získává instrukce zavaděče a pracovní data přes paměťovou hierarchii včetně cache; chybějící obsah se doplňuje z RAM. Zavaděč využívá dostupné služby firmwaru k přípravě startu systému. Nejde o jednorázový přesun celého programu do CPU a čtení obsah RAM nemaže.',
+        ['ram','cpu'],[flow('ramCpu','control','Instrukce zavaděče')],{},3200),completionEffects:{cpuSoftware:'Zavaděč'}},
+      step('system-request','Zavaděč připraví načtení jádra systému',
+        'Zavaděč vykonávaný CPU podle konfigurace určí jádro a prostředky nezbytné pro jeho spuštění, včetně počátečních ovladačů. Pomocí služeb a ovladačů dostupných během zavádění připraví čtení ze SSD. Ovladač NVMe zapíše do fronty v RAM příkazy určující čtené bloky a cílové oblasti paměti. Nejde ještě o činnost běžícího jádra systému.',
+        ['cpu','ram'],[flow('ramCpu','control','Načíst jádro',true)]),
+      step('system-notify','Ovladač oznámí SSD další příkazy',
+        'CPU podle instrukcí ovladače aktualizuje doorbell řadiče SSD pro nově připravené příkazy. Řadič si je převezme z fronty v RAM. Jedno oznámení může zpřístupnit více příkazů; nepřenáší samotný kód jádra ani ovladačů.',
         ['cpu','ssd'],[flow('cpuSsd','control','Oznámení nové práce')]),
-      step('system-load','Potřebné části systému se načtou do RAM',
-        'Z SSD se postupně načítá jádro, potřebné ovladače a další soubory pro start a přihlašovací prostředí. Tento krok shrnuje více čtení; celý systém se do RAM najednou nekopíruje.',
-        ['ssd','ram'],[flow('ssdRam','data','Části systému')],{},4000),
-      {...step('system-read','CPU převezme instrukce a data systému',
-        'Zavaděč předá řízení jádru systému. CPU načítá jeho instrukce a potřebná data z RAM.' + (detailed ? ' Čtení zprostředkovává cache; registry uchovávají právě používané hodnoty a adresy.' : ''),
-        ['ram',...cpuActive],[flow(readRoute,'control','Instrukce a data')],{},3200),completionEffects:{cpuSoftware:'Operační systém'}},
-      work('system-start','Operační systém zahájí provoz',
-        'CPU vykonává systém, který inicializuje ovladače, spouští služby a připravuje přihlašovací prostředí. Další soubory se v reálném počítači načítají průběžně; zde jsme jejich čtení shrnuli v předchozím kroku.',
-        'Spouštění systému'),
-      step('boot-image','CPU připraví obraz přihlášení v RAM',
-        'CPU při běhu systému a grafického ovladače zapíše do RAM podklady a příkazy pro přihlašovací obrazovku.',
+      step('system-load','Jádro a počáteční ovladače se načtou do RAM',
+        'Řadič SSD přenáší pomocí DMA bloky s jádrem a prostředky potřebnými pro jeho start do připravené RAM. Software zpracuje dokončení čtení a připraví kód, data i údaje pro předání řízení jádru. Krok shrnuje více operací; celý operační systém se najednou nekopíruje. Další ovladače, služby a přihlašovací prostředí se načítají také později, až při běhu systému.',
+        ['ssd','ram'],[flow('ssdRam','data','Jádro a ovladače')],{},4000),
+      {...step('system-read','CPU začne vykonávat jádro systému',
+        'Zavaděč ukončí zaváděcí služby UEFI voláním ExitBootServices a předá řízení jádru s potřebnými údaji o paměti a platformě. CPU začne vykonávat jeho instrukce a průběžně číst pracovní data přes cache a RAM. Systém přebírá správu prostředků a zařízení; vybrané běhové služby firmwaru zůstávají dostupné. Nejde o přenesení celého systému dovnitř CPU.',
+        ['ram','cpu'],[flow('ramCpu','control','Instrukce a data')],{},3200),completionEffects:{cpuSoftware:'Operační systém'}},
+      step('boot-image','Systém připraví podklady pro přihlášení',
+        'Systém běžící na CPU pokračuje v inicializaci zařízení, načítá další soubory ze SSD a spouští služby i přihlašovací prostředí. Jeho grafický software, knihovny a ovladače připraví v RAM podklady a vykreslovací příkazy. Příkazy určují novou práci pro GPU; nejsou přeposlanými instrukcemi jádra. Tento krok shrnuje také pokračující načítání, hotový obraz se teprve vykreslí.',
         ['cpu','ram'],[flow('ramCpu','data','Podklady a příkazy',true)]),
-      step('graphics-request','CPU oznámí grafické části novou práci',
-        'CPU oznámí grafické části připravené podklady a příkazy v RAM. Samotná obrazová data se tímto oznámením nepřenášejí.',
+      step('graphics-request','Grafický ovladač předá práci GPU',
+        'CPU podle instrukcí grafického softwaru a ovladače předá připravenou práci grafickému hardwaru. Grafický subsystém zajistí její zařazení a návaznost na předchozí operace. Konkrétní mechanismus závisí na hardwaru a ovladači; není nutně stejný jako doorbell SSD. Oznámení samo nepřenáší obrazové podklady, které si zařízení převezme z paměti.',
         ['cpu','gpu'],[flow('cpuGpu','control','Oznámení nové práce')]),
-      step('draw','Grafická část převezme podklady a příkazy',
-        'Integrovaná grafika načte ze společné RAM podklady a příkazy pro přihlašovací obrazovku a připraví její obraz. Pro jednoduchost nezobrazujeme dřívější logo firmwaru.',
+      step('draw','GPU vykreslí přihlašovací obrazovku do paměti',
+        'Integrovaná grafika využívá společnou systémovou RAM. GPU z ní čte podklady a vykreslovací příkazy a zapisuje výsledné obrazové plochy zpět do paměti. Grafický subsystém může více ploch složit do výsledné obrazovky. Krok shrnuje čtení, zpracování i zápisy; původní podklady se čtením nemažou. Dřívější zobrazení loga či nabídky firmwaru není v této ukázce zakreslené.',
         ['ram','gpu'],[flow('ramGpu','data','Podklady a příkazy')],{},3500),
-      {...step('ready','Počítač je připravený k přihlášení',
-        'Grafická část odešle monitoru obrazový signál. Po dokončení přenosu se zobrazí přihlašovací obrazovka; operační systém již běží v CPU.',
+      {...step('ready','Monitor zobrazí přihlašovací obrazovku',
+        'Zobrazovací část grafického hardwaru průběžně čte připravený obraz z RAM a vytváří obrazový signál pro monitor. Monitor podle něj zobrazuje přihlašovací obrazovku; čtení i přenos se opakují podle časování displeje. CPU již vykonává operační systém a přihlašovací prostředí. Ukázka končí zobrazením obrazu, skutečná komunikace s monitorem tím nekončí.',
         ['gpu','monitor'],[flow('gpuMonitor','output','Obrazový signál')],{},3000),completionEffects:{screen:'login',cpuWork:false}}
     ],{
       'loader-request':ramWrite(item('request','Načíst zavaděč')),
       'loader-load':ramWrite(item('loader','Zavaděč systému')),
-      'system-request':ramWrite(item('request','Načíst systém')),
-      'system-load':ramWrite(item('system','Části systému')),
+      'system-request':ramWrite(item('request','Načíst jádro')),
+      'system-load':ramWrite(item('system','Jádro a ovladače')),
       'boot-image':ramWrite(item('image','Podklady pro obraz'),item('commands','Příkazy pro grafiku'))
     });
-    return withRamFocus(withGraphics(steps,false,graphics,false,{
+    const configured = withGraphics(steps,graphics,false,{
       frameLabel:'Obraz přihlášení', imageDescription:'přihlašovací obrazovky',
-      preparationScreen:null, outputDescription:'po dokončení přenosu se objeví přihlašovací obrazovka.'
-    }),{
+      preparationScreen:null
+    });
+    // Texty zavádění systému mají vlastní kontext, nezmění kalkulačku ani video.
+    const dedicatedText = {
+      'graphics-request':{
+        description:'CPU podle instrukcí grafického softwaru a ovladače předá dedikované kartě práci pro přihlašovací obrazovku. Grafický subsystém zajistí zařazení a synchronizaci. Umístění příkazů a obrazových prostředků závisí na hardwaru a ovladači; zde karta načítá příkazy ze systémové RAM a obrazové podklady se nejprve kopírují do VRAM.'
+      },
+      'graphics-commands-read':{
+        title:'Karta načte vykreslovací příkazy z RAM',
+        description:'Grafická karta načítá ze systémové RAM připravené vykreslovací příkazy a odkazy na obrazové prostředky přihlašovacího prostředí. Jde o práci připravenou grafickým softwarem a ovladačem, nikoli o instrukce operačního systému vykonávané CPU. Konkrétní umístění příkazových bufferů závisí na použitém hardwaru a ovladači.'
+      },
+      'graphics-upload':{
+        title:'Karta přenese podklady do vlastní VRAM',
+        description:'Kopírovací jednotka karty přenese vybrané obrazové podklady ze systémové RAM do VRAM pomocí DMA. CPU připravuje přenos a jeho návaznost na vykreslení; jeho výpočetní jádra nemusí kopírovat jednotlivé bajty. Zde ukazujeme běžnou variantu s podklady ve VRAM. Některé prostředky mohou podle hardwaru a ovladače zůstat v systémové paměti nebo vzniknout přímo ve VRAM.'
+      },
+      'graphics-input':{
+        title:'GPU čte podklady přihlášení z VRAM',
+        description:'GPU podle vykreslovacích příkazů průběžně čte potřebné obrazové podklady z VRAM. Nejde o jednorázové převzetí celého jejího obsahu do výpočetních jednotek. Čtení data nemaže; případné kopie v systémové RAM mohou zůstat zachované. Čtení podkladů a vytváření výsledku se při skutečném vykreslování prolínají.'
+      },
+      'graphics-store':{
+        title:'GPU vykreslí obraz přihlášení do VRAM',
+        description:'GPU vykonává připravené grafické příkazy a zapisuje výsledné obrazové plochy do VRAM. Grafický subsystém může jejich obsah složit do obrazu přihlašovací obrazovky. Výsledek zůstává v paměti dostupný zobrazovací části; není ještě obrazovým signálem. Čtení a zápisy vznikají průběžně při vykreslování, i když je ukázka rozděluje do samostatných kroků.'
+      },
+      'graphics-scanout':{
+        title:'Zobrazovací část čte obraz přihlášení z VRAM',
+        description:'Zobrazovací část grafické karty čte z VRAM obraz připravený k zobrazení a podle něj vytváří výstup pro monitor. Čtení se opakuje podle časování displeje a průběžně navazuje na přenos obrazového signálu. Tento krok zvýrazňuje paměťový přístup zobrazovací části, nikoli další vykreslování výpočetními jednotkami GPU.'
+      },
+      ready:{
+        description:'Zobrazovací část karty průběžně vytváří obrazový signál z připraveného obrazu ve VRAM. Přímo připojený monitor podle něj zobrazuje přihlašovací obrazovku. Čtení paměti a přenos signálu se opakují podle časování displeje; ukončením ukázky skutečná komunikace nekončí. CPU již vykonává operační systém a přihlašovací prostředí.'
+      }
+    };
+    return withRamFocus(configured.map(s => graphics === 'dedicated' && dedicatedText[s.id]
+      ? {...s,...dedicatedText[s.id]} : s),{
       'boot-image':focus(['image','commands'],'Podklady a příkazy'),
       draw:focus(['image','commands'],'Podklady a příkazy'),
       'graphics-commands-read':focus(['commands']),
@@ -380,89 +243,83 @@ window.HWLab = window.HWLab || {};
 
   // Stabilní id položek dovoluje doplnit nebo aktualizovat obsah. Čtení nic
   // nemaže a přenos kódu ze SSD nemění jeho dlouhodobě uloženou kopii.
-  const calculatorMemory = detailed => ({
+  const calculatorMemory = {
     'read-request-write': ramWrite(item('request', 'Požadavek na načtení')),
     load: ramWrite(item('program', 'Kód a data kalkulačky')),
-    'write-data': ramWrite(item('image', 'Podklady pro obraz'),
-      ...(!detailed ? [item('commands', 'Příkazy pro grafiku')] : [])),
-    'graphics-commands-write': ramWrite(item('commands', 'Příkazy pro grafiku'))
-  });
-  const youtubeMemory = detailed => ({
+    'write-data': ramWrite(item('image', 'Podklady pro obraz'), item('commands', 'Příkazy pro grafiku'))
+  };
+  const youtubeMemory = {
     'request-write': ramWrite(item('request', 'Požadavek na video')),
     buffer: ramWrite(item('received', 'Video a zvuk (část 1)')),
-    'playback-write': ramWrite(item('prepared', 'Video a zvukové vzorky'),
-      ...(!detailed ? [item('commands', 'Příkazy pro grafiku')] : [])),
-    'video-commands-write': ramWrite(item('commands', 'Příkazy pro grafiku'))
-  });
+    'playback-write': ramWrite(item('prepared', 'Video a zvukové vzorky'), item('commands', 'Příkazy pro grafiku'))
+  };
 
   // Výběr v RAM je součástí obsahu scénáře, neodvozuje se z textu zprávy.
   // Související data a příkazy shrnujeme do jedné čitelné položky.
-  const calculatorRamFocus = detailed => ({
-    'write-data':focus(detailed ? ['image'] : ['image','commands'],detailed ? undefined : 'Podklady a příkazy'),
-    draw:focus(detailed ? ['image'] : ['image','commands'],detailed ? undefined : 'Podklady a příkazy'),
+  const calculatorRamFocus = {
+    'write-data':focus(['image','commands'],'Podklady a příkazy'),
+    draw:focus(['image','commands'],'Podklady a příkazy'),
     'graphics-commands-read':focus(['commands']),
     'graphics-upload':focus(['image'])
-  });
-  const youtubeRamFocus = detailed => ({
+  };
+  const youtubeRamFocus = {
     'received-read':focus(['program','received'],'Instrukce a data'),
-    'playback-write':focus(detailed ? ['prepared'] : ['prepared','commands'],detailed ? undefined : 'Data a příkazy'),
-    'video-commands-read':focus(['commands']),
-    'video-read':focus(detailed ? ['prepared'] : ['prepared','commands'],detailed ? 'Video' : 'Video a příkazy'),
+    'playback-write':focus(['prepared','commands'],'Data a příkazy'),
+    'video-read':focus(['prepared','commands'],'Video a příkazy'),
     'graphics-commands-read':focus(['commands']),
     'graphics-upload':focus(['prepared'],'Video'),
     'audio-setup':focus(['prepared'],'Zvukové vzorky'),
     'audio-read':focus(['prepared'],'Zvukové vzorky'),
-    'image-output':focus(['prepared'],'Video'),
-    'sound-output':focus(['prepared'],'Zvukové vzorky'),
     playback:focus(['prepared'],'Video a zvuk')
-  });
+  };
   const saveRamFocus = {
     'save-read':focus(['program','document'],'Instrukce a data'),
-    'save-prepare':focus(['document']),
     'save-transfer':focus(['file'])
   };
 
   // Dedikovaná karta načítá příkazy ze systémové RAM, ale obrazové podklady
   // kopíruje do vlastní VRAM. Nevedeme do ní program CPU ani zvukové vzorky.
   // Jde o jednu názornou variantu desktopové karty s přímo připojeným monitorem.
-  const withGraphics = (steps, detailed, graphics, video, options = {}) => {
+  const withGraphics = (steps, graphics, video, options = {}) => {
     if (graphics !== 'dedicated') return steps;
     const input = video ? 'Komprimované video' : 'Podklady pro obraz';
     const frames = video ? 'Obrazové snímky' : (options.frameLabel || 'Obraz okna');
     const imageDescription = options.imageDescription || 'okna kalkulačky';
     const upload = () => ({ ...step('graphics-upload', 'Karta přenese obrazová data do VRAM',
-      'Kopírovací část grafické karty přenese ' + (video ? 'komprimované video' : 'obrazové podklady') + ' z RAM do vlastní paměti VRAM pomocí DMA. CPU nemusí jednotlivé bajty kopírovat. Příkazy se načítají z RAM; do VRAM zde ukládáme obrazový obsah.',
+      video ? 'Kopírovací jednotka karty přenese komprimované video ze systémové RAM do VRAM pomocí DMA. CPU připravuje přenos a jeho návaznost na další práci; jednotlivé bajty nemusí kopírovat jeho výpočetní jádra. Zde ukazujeme variantu s videem ve VRAM; konkrétní ovladač může vstupní data umístit i jinak.'
+        : 'Kopírovací část grafické karty přenese obrazové podklady z RAM do vlastní paměti VRAM pomocí DMA. CPU nemusí jednotlivé bajty kopírovat. Příkazy se načítají z RAM; do VRAM zde ukládáme obrazový obsah.',
       ['ram','gpu','vram'], [flow('ramVram','data',input)], {}, 3500),
       memoryWrites: { vram:[item('input',input)] } });
     const read = () => step('graphics-input', 'GPU čte podklady z vlastní VRAM',
-      'GPU načte ' + (video ? 'komprimované video pro dekódování' : 'obrazové podklady ' + imageDescription) + ' z VRAM na grafické kartě. Systémová RAM si dál ponechává svoji kopii.',
+      video ? 'Videodekodér karty získává z VRAM komprimované obrazové údaje podle připravených příkazů. Průběžně čte potřebné části vstupního proudu; nepřenáší si celé video jednorázově do výpočetních jednotek. Čtení původní obsah VRAM nemaže.'
+        : 'GPU načte obrazové podklady ' + imageDescription + ' z VRAM na grafické kartě. Systémová RAM si dál ponechává svoji kopii.',
       ['vram','gpu'], [flow('gpuVram','data',input,true)], {}, 2600);
     const store = () => ({ ...step('graphics-store', 'GPU ukládá hotový obraz do VRAM',
-      video ? 'Videodekodér GPU vytvořil obrazové snímky. Grafická karta je uloží do VRAM, odkud je může číst její zobrazovací část.'
+      video ? 'Videodekodér zapisuje nekomprimované snímky do obrazových paměťových ploch ve VRAM. Zápisy vznikají už během dekódování; tento krok zvýrazňuje uložení výsledku. Snímky mohou dále projít úpravou barev, velikosti a složením s obsahem webové stránky.'
         : 'GPU zpracuje podklady a vykreslí obraz ' + imageDescription + ' do VRAM. Na monitor se zatím neposílá hotový obraz.',
       ['gpu','vram'], [flow('gpuVram','data',frames)], options.preparationScreen === null ? {} : { screen:'loading' }, 3100),
       memoryWrites: { vram:[item('frames',frames)] } });
     const scanout = () => step('graphics-scanout', 'Zobrazovací část karty čte obraz z VRAM',
-      'Zobrazovací část grafické karty načítá hotový obraz z VRAM. Poté jej odešle jako obrazový signál přímo připojenému monitoru. Při přehrávání se toto čtení průběžně opakuje; zde ukazujeme jeden přenos.',
+      video ? 'Zobrazovací část grafické karty čte z VRAM hotový obraz připravený k zobrazení. Může jít o obraz složený z videa a ostatního obsahu obrazovky, nikoli přímo o původní výstup videodekodéru. Čtení se opakuje podle časování displeje a navazuje na něj přenos obrazového signálu do monitoru.'
+        : 'Zobrazovací část grafické karty načítá hotový obraz z VRAM. Poté jej odešle jako obrazový signál přímo připojenému monitoru. Při přehrávání se toto čtení průběžně opakuje; zde ukazujeme jeden přenos.',
       ['vram','gpu'], [flow('gpuVram','data',video ? 'Obrazový snímek' : frames,true)], {}, 2600);
-    const process = s => ({ ...s, description:'Videodekodér GPU zpracuje komprimované video načtené z vlastní VRAM. Vytvoří obrazové snímky, které grafická karta následně uloží zpět do VRAM.' });
+    const process = s => ({ ...s, description:'Specializovaný videodekodér grafické karty podle řídicích údajů převádí komprimované video z VRAM na obrazové snímky. Výsledek zapisuje do obrazových paměťových ploch ve VRAM; tuto část práce zdůrazní následující krok. Hardwarové dekódování vyžaduje podporu použitého formátu v dekodéru a ovladači.' });
     return steps.flatMap(s => {
       if (['graphics-request','graphics-notify'].includes(s.id)) return [{ ...s,
-        description:'CPU oznámí dedikované grafické kartě novou práci. Karta si načte příkazy z RAM a podle nich přenese potřebná obrazová data do své VRAM.' }];
+        description:video ? 'CPU podle instrukcí grafického ovladače a operačního systému předá dedikované grafické kartě dekódovací práci. Ovladač a systém správy GPU zajistí její zařazení a návaznost na předchozí operace. Karta si načte příkazy ze systémové RAM a podle nich zpřístupní videodekodéru komprimované video; v této variantě se vstup nejprve kopíruje do VRAM.'
+          : 'CPU podle instrukcí grafického ovladače a operačního systému předá dedikované grafické kartě připravenou práci. Ovladač a systém správy GPU zajistí její zařazení do fronty a potřebnou synchronizaci s předchozími operacemi. Konkrétní způsob předání závisí na grafickém hardwaru a ovladači. Karta si příkazy načte ze systémové RAM a podle nich přenese potřebné obrazové podklady do VRAM.' }];
       if (s.id === 'draw' || s.id === 'video-read') {
-        const commands = detailed ? [] : [step('graphics-commands-read', 'GPU načte příkazy z RAM',
-          'Grafická karta načte příkazy ze systémové RAM. Ty určují požadovanou práci a umístění obrazových dat; samy nejsou obrazovým signálem.',
+        const commands = [step('graphics-commands-read', 'GPU načte příkazy z RAM',
+          video ? 'Grafický hardware načte ze systémové RAM příkazy pro videodekodér. Obsahují řídicí údaje pro dekódování a odkazy na vstupní video i výstupní paměťové plochy. Jde o práci připravenou ovladačem, nikoli o instrukce prohlížeče vykonávané CPU.'
+            : 'Grafická karta načte příkazy ze systémové RAM. Ty určují požadovanou práci a umístění obrazových dat; samy nejsou obrazovým signálem.',
           ['ram','gpu'], [flow('ramGpu','control','Příkazy pro grafiku')])];
-        return [...commands,upload(),read(),...(!video ? [store()] : detailed ? [process({
-          ...step('video-process','GPU zpracovává video','Zpracování videa ve vlastní paměti karty.',
-            ['gpu'],[],{screen:'loading'},3000), highlights:[highlight('gpu','Zpracování videa')]
-        }),store()] : [])];
+        return [...commands,upload(),read(),...(!video ? [store()] : [])];
       }
       if (s.id === 'video-process') return [process(s),store()];
-      if (['ready','playback','image-output'].includes(s.id)) return [scanout(),{ ...s,
+      if (s.flows.some(f => f.route === 'gpuMonitor')) return [scanout(),{ ...s,
         description:s.id === 'playback'
-          ? 'Grafická karta posílá obraz z připravených snímků ve VRAM a zvuková část přehrává vzorky ze systémové RAM. Další přijaté části videa a zvuku zatím přibývají do RAM; krátká ukázka se pak zastaví.'
-          : 'Grafická karta posílá obrazový signál přímo připojenému monitoru. Hotový obraz je uložený ve VRAM; ' + (video ? 'zvuková část dál používá systémovou RAM.' : (options.outputDescription || 'na monitoru se objeví okno kalkulačky.')) }];
+          ? 'Zobrazovací část karty opakovaně čte připravený obraz z VRAM a vytváří signál pro přímo připojený monitor. Zvukové zařízení souběžně zpracovává vzorky ze systémové RAM. Přehrávač časuje obraz a zvuk podle společného časového základu a zohledňuje zpoždění výstupů. Zatím přicházejí další části obsahu; příprava na CPU, dekódování a doplňování bufferů se při pokračujícím přehrávání opakují a překrývají.'
+          : 'Grafická karta posílá obrazový signál přímo připojenému monitoru. Hotový obraz je uložený ve VRAM; ' + (video ? 'zvuková část dál používá systémovou RAM.' : (options.outputDescription || 'po dokončení přenosu se v následujícím kroku zobrazí kalkulačka.')) }];
       return [s];
     });
   };
@@ -473,23 +330,23 @@ window.HWLab = window.HWLab || {};
       initialMemory: { ssd: [item('program', 'Kód a data kalkulačky')], ram: [] },
       emptyMemory: { ram: 'Bez dat kalkulačky' },
       initial: { title: 'Vše začíná jedním kliknutím', description: 'Počítač je zapnutý, kalkulačka neběží a její potřebné části ještě nejsou v RAM. Spusťte ukázku nebo postupujte po jednotlivých krocích.', screen: 'desktop', ramLoaded: false, buffer: 0, playback: false, segment: 0, cpuWork: false, clicked: false },
-      createSteps: (detailed, graphics = 'integrated') => withRamFocus(withGraphics(withMemory(detailed ? calc(true) : calcBasic(), calculatorMemory(detailed)), detailed, graphics, false),calculatorRamFocus(detailed)) },
+      createSteps: (graphics = 'integrated') => withRamFocus(withGraphics(withMemory(calculatorSteps(), calculatorMemory), graphics, false),calculatorRamFocus) },
     { id: 'youtube', title: 'Spuštění videa na YouTube', shortTitle: 'Video na YouTube', subtitle: 'Od přehrání k obrazu a zvuku', icon: 'video',
       diagram: { server: true },
       initialMemory: { ssd: [item('program', 'Kód a data prohlížeče')], ram: [item('program', 'Kód a data prohlížeče')] },
-      initial: { title: 'Video čeká na přehrání', description: 'Prohlížeč i stránka YouTube jsou otevřené, přehrávání stojí a vyrovnávací paměť je prázdná. Úvodní kroky ukazujeme postupně; příjem dalších dat, zpracování a přehrávání se mohou překrývat.', screen: 'youtube', ramLoaded: false, buffer: 0, playback: false, playbackFrom: 0, playbackTo: 0, soundPlaying: false, cpuWork: false, clicked: false },
-      createSteps: (detailed, graphics = 'integrated') => withRamFocus(withGraphics(withMemory(detailed ? youtube(true) : youtubeBasic(), youtubeMemory(detailed)), detailed, graphics, true),youtubeRamFocus(detailed)) },
+      initial: { title: 'Video čeká na přehrání', description: 'Prohlížeč i stránka YouTube už jsou otevřené a jejich potřebný kód je v RAM. Ukázka začíná před načtením přehrávaného úseku. Předpokládá hardwarové dekódování videa a softwarové dekódování zvuku na CPU. Při přehrávání se příjem, příprava dat, dekódování a výstup průběžně překrývají.', screen: 'youtube', ramLoaded: false, buffer: 0, playback: false, playbackFrom: 0, playbackTo: 0, soundPlaying: false, cpuWork: false, clicked: false },
+      createSteps: (graphics = 'integrated') => withRamFocus(withGraphics(withMemory(youtubeSteps(), youtubeMemory), graphics, true),youtubeRamFocus) },
     { id:'save', title:'Uložení souboru', shortTitle:'Uložení souboru', subtitle:'Z RAM do paměti SSD', icon:'save',
       diagram:{server:false},
       initialMemory:{ssd:[item('program','Kód editoru')],ram:[item('program','Kód a data editoru'),item('document','Rozepsaný dokument')]},
-      initial:{title:'Dokument čeká na uložení',description:'Textový editor je otevřený a v RAM je rozepsaný dokument. Soubor poznamky.txt na SSD ještě není. Ukázka sleduje jeho uložení až do flash paměti SSD.',
+      initial:{title:'Dokument čeká na uložení',description:'Editor je otevřený a rozepsaný dokument je v RAM. Soubor poznamky.txt na SSD ještě není. Ukázka sleduje přípravu obsahu a zápis na NVMe SSD až po trvalé uložení. Skutečný systém může zápisy odkládat a slučovat; jednotlivé přenosy se nemusí provést bezprostředně po kliknutí na Uložit.',
         screen:'editor',ramLoaded:true,buffer:0,playback:false,soundPlaying:false,cpuWork:false,clicked:false},
-      createSteps:detailed => withRamFocus(saveFile(detailed),saveRamFocus) },
+      createSteps:() => withRamFocus(saveFile(),saveRamFocus) },
     { id:'boot',title:'Zapnutí počítače',shortTitle:'Zapnutí počítače',subtitle:'Od vypínače k přihlášení',icon:'power',
       diagram:{server:false,boot:true},
       initialMemory:{ssd:[item('loader','Zavaděč'),item('system','Systém a data')],ram:[]},
-      emptyMemory:{ram:'Připravená, prázdná'},
-      initial:{title:'Počítač čeká na zapnutí',description:'Počítač je připojený k zásuvce, hlavní napájení je vypnuté. Flash obsahuje firmware UEFI, SSD zavaděč a operační systém. RAM ještě není připravená. Spusťte ukázku stisku vypínače.',
+      emptyMemory:{ram:'Bez dat systému'},
+      initial:{title:'Počítač čeká na zapnutí',description:'Ukázka sleduje plný start stolního počítače s UEFI a NVMe SSD až k přihlášení. Zdroj je připojený k síti a dodává pohotovostní napájení, jeho hlavní výstupy jsou vypnuté. Flash obsahuje firmware, SSD zaváděcí programy a operační systém. RAM ještě není inicializovaná. Nejde o obnovení z režimu spánku či hibernace; v pamětech zobrazujeme jen vybraný obsah související se scénářem.',
         screen:'black',powered:false,ramReady:false,cpuSoftware:'Čeká na start',ramLoaded:false,buffer:0,playback:false,soundPlaying:false,cpuWork:false,clicked:false},
       createSteps:boot }
   ];

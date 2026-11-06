@@ -9,15 +9,15 @@ window.HWLab = window.HWLab || {};
     boundary: { x:50, y:20, w:995, h:610 },
     nodes: {
       ram:      { x:470,  y:25,  w:220, h:150 },
-      cpu:      { x:470,  y:340, w:220, h:190 },
+      cpu:      { x:480,  y:370, w:200, h:130 },
       ssd:      { x:70,   y:387.5, w:180, h:95 },
-      uefi:     { x:265,  y:240, w:155, h:95 },
+      uefi:     { x:282.5,y:252.5,w:120,h:70 },
       audio:    { x:820,  y:230, w:200, h:75 },
       network:  { x:820,  y:60,  w:200, h:80 },
       gpu:      { x:820,  y:387.5, w:200, h:95 },
       vram:     { x:820,  y:525, w:200, h:85 },
-      psu:      { x:70,   y:535, w:160, h:60 },
-      outlet:   { x:70,   y:650, w:60,  h:64 },
+      psu:      { x:210,  y:608, w:160, h:60 },
+      outlet:   { x:125,  y:650, w:60,  h:64 },
       mouse:    { x:550,  y:650, w:60,  h:64 },
       powerbutton:{ x:550,y:650,w:60,h:64 },
       speakers: { x:1182, y:233.5, w:92,  h:68 },
@@ -52,7 +52,6 @@ window.HWLab = window.HWLab || {};
   });
   const bus = { top:[755,port('ram','right')[1]], audio:[755,port('audio','left')[1]], bottom:[755,port('cpu','right')[1]] };
   const firmwareBranch = [port('uefi','right'),[435,port('uefi','right')[1]],[435,port('cpu','left')[1]]];
-  const memoryLabel = [485,(port('ram','bottom')[1]+port('cpu','top')[1])/2];
   // Logické trasy sdílejí jednu svislou cestu a připojují se ve středech stran.
   const routes = {
     mouseCpu: route([port('mouse','top'), port('cpu','bottom')], {labelWidth:136}),
@@ -60,9 +59,6 @@ window.HWLab = window.HWLab || {};
     uefiCpu: route([...firmwareBranch,port('cpu','left')], {labelWidth:164}),
     ssdRam: route([port('ssd','top'), [port('ssd','top')[0],bus.top[1]], port('ram','left')], {labelWidth:176,radius:24}),
     ramCpu: route([port('ram','bottom'), port('cpu','top')], {labelWidth:164}),
-    // V detailu stejný vstup do CPU pokračuje kolem nadpisu do středu pravé strany cache.
-    ramCache: route([port('ram','bottom'), port('cpu','top'), point('cpu',110,8), point('cpu',210,8), point('cpu',210,73), point('cpu',202,73)], {labelWidth:164,detailed:true,onUse:true,radius:5}),
-    cacheRegisters: route([point('cpu',110,94), point('cpu',110,124)], {detailed:true,internal:true}),
     cpuGpu: route([port('cpu','right'), port('gpu','left')], {labelWidth:124}),
     cpuNetwork: route([port('cpu','right'), bus.bottom, bus.top, port('network','left')], {labelWidth:124}),
     ramGpu: route([port('ram','right'), bus.top, bus.bottom, port('gpu','left')], {labelWidth:176}),
@@ -81,7 +77,7 @@ window.HWLab = window.HWLab || {};
     mouseCpu:routes.mouseCpu, cpuSsd:routes.cpuSsd, ssdRam:routes.ssdRam,
     // Poslední úsek k CPU sdílí podklad s cpuSsd; nekreslí se podruhé.
     uefiBranch:route(firmwareBranch),
-    ramCpu:routes.ramCpu, ramCache:routes.ramCache, cacheRegisters:routes.cacheRegisters,
+    ramCpu:routes.ramCpu,
     ramNetwork:routes.networkRam, cpuGpu:routes.cpuGpu,
     shared:route([bus.top,bus.bottom]), audioBranch:route([bus.audio,port('audio','left')]),
     vramBranch:route([bus.bottom,[bus.bottom[0],port('vram','left')[1]],port('vram','left')], {dedicated:true}),
@@ -93,12 +89,24 @@ window.HWLab = window.HWLab || {};
   const power = {
     components:['ram','cpu','ssd','uefi','network','audio','gpu'],
     dedicatedComponents:['vram'],
-    ac:route([port('outlet','top'),[100,642],[port('psu','bottom')[0],642],port('psu','bottom')], {radius:6}),
-    dc:route([port('psu','right'),[390,port('psu','right')[1]],[390,638],[1053,638],[1053,12],[42,12],[42,638],[68,638]], {radius:10})
+    ac:route([
+      port('outlet','right'),
+      [port('psu','bottom')[0],port('outlet','right')[1]],
+      port('psu','bottom')
+    ]),
+    dc:route([port('psu','right'),[1053,638],[1053,12],[42,12],[42,638],[68,638]], {radius:10})
   };
   const powerBadge = id => {
     const b = layout.nodes[id];
     return `<g class="power-badge" id="power-badge-${id}" data-component="${id}" transform="translate(${b.x-10} ${b.y+14})"><title>Napájeno ze zdroje přes desku nebo napájecí kabely</title><rect x="-9" y="-12" width="18" height="24" rx="5"/><path d="M2-8-5 1h5l-2 7L6-1H1Z"/></g>`;
+  };
+  // Samostatný symbol chlazení ve volném místě pod CPU, vedle oblasti VRAM.
+  const cooling = { x:699, y:555, w:50, h:50 };
+  const coolingMotion = state => {
+    const powered = state.effects.powered !== false;
+    const elapsed = !powered || state.index < 0 ? 0
+      : state.steps.slice(0,state.index).reduce((time,step)=>time+step.duration,0)+state.step.duration*state.progress;
+    return {powered,angle:(elapsed*.09)%360};
   };
   const flowPath = flow => flow.reverse
     ? pathData([...routes[flow.route].points].reverse(),routes[flow.route].radius)
@@ -117,18 +125,16 @@ window.HWLab = window.HWLab || {};
     return Math.max(0,Math.min(1,(state.progress-start)/(end-start)));
   };
   const activityPositions = {
-    cpu: { label:point('cpu',layout.nodes.cpu.w/2,105), labelWidth:180 },
-    cpuRam: { label:[port('cpu','top')[0], memoryLabel[1]], labelWidth:220 },
     gpu: { label:point('gpu',layout.nodes.gpu.w/2,70), labelWidth:180 },
     ssd: { label:point('ssd',layout.nodes.ssd.w/2,-35), labelWidth:180 },
-    power: { label:[400,680],labelWidth:176 }
+    power: { label:point('psu',layout.nodes.psu.w/2,-43),labelWidth:176 }
   };
   // Obsah využívá celou plochu pod názvem. Menší paměti mají kompaktnější
   // odsazení; písmo se měří podle počtu položek a skutečně zalomených řádků.
   const memoryAreas = {
     ram:  { x:12, y:46, w:196, h:92, fontSize:24, paddingX:10, paddingY:8 },
     ssd:  { x:10, y:36, w:160, h:49, fontSize:20, paddingX:6, paddingY:1 },
-    uefi: { x:10, y:40, w:135, h:45, fontSize:24, paddingX:8, paddingY:6 },
+    uefi: { x:8, y:32, w:104, h:30, fontSize:18, paddingX:6, paddingY:3 },
     vram: { x:8, y:34, w:184, h:45, fontSize:20, paddingX:3, paddingY:0 }
   };
   const serverIcon = (x, y) => `<g class="node-icon" transform="translate(${x} ${y})"><rect x="0" y="0" width="34" height="12" rx="3"/><rect x="0" y="17" width="34" height="12" rx="3"/><path d="M8 6h14M8 23h14m6-17h1m-1 17h1"/></g>`;
@@ -155,9 +161,10 @@ window.HWLab = window.HWLab || {};
         <g id="gpu-card"><rect class="gpu-card-box" x="805" y="350" width="230" height="270" rx="12"/><text class="graphics-note" x="820" y="373">Dedikovaná karta</text></g>
         <g id="base-routes">${Object.entries(connections).map(([id,r]) => `<path id="route-${id}" class="route-base" d="${r.d}"/>`).join('')}</g>
         ${box('ram', '<text class="node-label" x="18" y="32">RAM</text><g id="memory-ram" aria-label="Zobrazený obsah RAM"></g>')}
-        ${box('cpu', `<text class="node-label" x="18" y="32">Procesor</text><g id="cpu-detail"><rect class="node-inner cache-box" x="18" y="52" width="184" height="42" rx="6"/><text class="inner-label cache-label" x="30" y="78">Cache CPU</text><rect class="node-inner registers-box" x="18" y="124" width="184" height="48" rx="6"/><text class="inner-label registers-label" x="30" y="145">Registry CPU</text><text class="inner-sub" x="30" y="163">jednotlivé hodnoty a adresy</text><text class="inner-sub" x="130" y="111">hodnoty ↓</text></g>`)}
+        ${box('cpu', `<text class="node-label" x="18" y="32">Procesor</text><g id="cpu-software" transform="translate(12 ${layout.nodes.cpu.h-68})"><rect width="${layout.nodes.cpu.w-24}" height="56" rx="7"/><text class="software-caption" x="${(layout.nodes.cpu.w-24)/2}" y="20" text-anchor="middle">CPU vykonává</text><text id="cpu-software-name" class="software-name" x="${(layout.nodes.cpu.w-24)/2}" y="42" text-anchor="middle"></text></g>`)}
+        <g id="cooling-fan" transform="translate(${cooling.x} ${cooling.y})" aria-label="Ventilátor chlazení počítače"><title>Elektricky napájený ventilátor představuje aktivní chlazení počítače. Jeho otáčení se řídí společným časem simulace.</title><g transform="translate(25 25)"><circle class="cooler-fan-ring" r="25"/><g id="cooler-rotor">${Array.from({length:5},(_,i)=>`<path class="cooler-blade" d="M-4-5C-11-20 2-28 12-19C17-15 15-7 5-3Z" transform="rotate(${i*72})"/>`).join('')}</g><circle class="cooler-fan-hub" r="5.5"/></g><text class="cooling-label" x="25" y="70" text-anchor="middle">Ventilátor</text></g>
         ${box('ssd', '<text class="node-label" x="14" y="27">SSD</text><g id="memory-ssd" aria-label="Zobrazený obsah SSD"></g>')}
-        ${box('uefi', '<title>Flash paměť na základní desce uchovává firmware UEFI i bez napájení. Při startu CPU vykonává jeho kód, který připraví hardware a zahájí zavádění operačního systému. Tyto ukázky začínají až po startu počítače.</title><text class="node-label" x="18" y="29">Flash paměť</text><g id="memory-uefi" aria-label="Trvale uložený firmware UEFI"></g>')}
+        ${box('uefi', '<title>Flash paměť na základní desce uchovává firmware UEFI i bez napájení. Při startu CPU vykonává jeho kód, který připraví hardware a zahájí zavádění operačního systému. Tyto ukázky začínají až po startu počítače.</title><text class="node-label" x="10" y="22">Flash paměť</text><g id="memory-uefi" aria-label="Trvale uložený firmware UEFI"></g>')}
         ${box('audio', '<text class="node-label" x="18" y="29">Zvuková část</text>')}
         ${box('network', '<text class="node-label" x="18" y="29">Síťové rozhraní</text>')}
         ${box('gpu', '<text class="node-label" id="gpu-name" x="18" y="30">Grafická část</text>')}
@@ -165,15 +172,14 @@ window.HWLab = window.HWLab || {};
         ${box('vram', '<text class="node-label" x="18" y="27">VRAM</text><g id="memory-vram" aria-label="Zobrazený obsah VRAM"></g>')}
         <path class="power-input" d="${power.ac.d}"/>
         ${box('psu', '<title>Zdroj převádí vstupních 230 V střídavých na stejnosměrné výstupy 12 V, 5 V a 3,3 V. Měniče na desce a kartách napětí dále upravují pro jednotlivé čipy.</title><text class="node-label" x="80" y="38" text-anchor="middle">Zdroj</text>')}
-        <g id="voltage-output" class="voltage-output" aria-label="Výstup zdroje: stejnosměrné napětí 12 V, 5 V a 3,3 V"><text class="voltage-kind" x="250" y="524">Stejnosměrné (12 V, 5 V, 3,3 V)</text></g>
-        ${box('outlet', '<title>Zásuvka dodává střídavé napětí 230 V do zdroje počítače</title><g class="outlet-art" aria-hidden="true"><circle cx="30" cy="31" r="22"/><rect x="27" y="13" width="6" height="11" rx="2"/><circle cx="21" cy="35" r="3.2"/><circle cx="39" cy="35" r="3.2"/></g><text class="node-label" x="78" y="18">Zásuvka</text><g id="voltage-input" aria-label="Vstup zdroje ze zásuvky: střídavé napětí 230 V"><text class="voltage-kind" x="78" y="40">Střídavé (230 V)</text></g>')}
+        <g id="voltage-output" class="voltage-output" aria-label="Výstup zdroje: stejnosměrné napětí 12 V, 5 V a 3,3 V"><text class="voltage-kind" x="${layout.nodes.psu.x+layout.nodes.psu.w+8}" y="${layout.nodes.psu.y+layout.nodes.psu.h+12}"><tspan>Stejnosměrné </tspan><tspan x="${layout.nodes.psu.x+layout.nodes.psu.w+8}" dy="16">(12 V, 5 V, 3,3 V)</tspan></text></g>
+        ${box('outlet', '<title>Zásuvka dodává střídavé napětí 230 V do zdroje počítače</title><g class="outlet-art" aria-hidden="true"><circle cx="30" cy="31" r="22"/><rect x="27" y="13" width="6" height="11" rx="2"/><circle cx="21" cy="35" r="3.2"/><circle cx="39" cy="35" r="3.2"/></g><text class="node-label" x="-16" y="29" text-anchor="end">Zásuvka</text><g id="voltage-input" aria-label="Vstup zdroje ze zásuvky: střídavé napětí 230 V"><text class="voltage-kind" x="-16" y="49" text-anchor="end">Střídavé (230 V)</text></g>')}
         <g class="diagram-node" id="node-mouse" transform="${placed('mouse',550,450)}"><rect class="node-box" x="550" y="450" width="60" height="64" rx="27"/><path class="node-icon" d="M580 451v25m-29 0h58"/><rect x="577" y="459" width="6" height="12" rx="3" fill="#9facbf"/><g id="mouse-click"><circle cx="565" cy="463" r="6" fill="var(--flow)" opacity=".25"/><path d="m554 444-5-6m14 3-1-7m-16 23-7-1" stroke="var(--flow)" stroke-width="2" stroke-linecap="round"/></g><text class="node-label" x="636" y="491">Myš</text></g>
         <g class="diagram-node" id="node-server" transform="${placed('server',1050,45)}"><rect class="node-box" x="1050" y="45" width="135" height="120" rx="12"/>${serverIcon(1100,64)}<text class="node-label" style="font-size:18px" x="1117" y="123" text-anchor="middle">Vzdálený</text><text class="node-label" style="font-size:18px" x="1117" y="145" text-anchor="middle">server</text><text class="external-note" x="1117" y="30">internet</text></g>
         <g class="diagram-node" id="node-monitor" transform="${placed('monitor',1048,246)}"><rect class="node-box" x="1048" y="246" width="137" height="95" rx="7"/><rect class="screen-content" x="1055" y="253" width="123" height="79" rx="3"/><path class="monitor-stand" d="M1116 341v15m-24 0h48"/><g id="screen-desktop"><rect x="1065" y="265" width="19" height="22" rx="3" fill="#5275d2"/><path d="M1069 270h11m-11 5h3m4 0h3m-10 5h3m4 0h3" stroke="#fff" stroke-width="1.5"/><text class="screen-tiny" x="1062" y="298">Kalkulačka</text></g><g id="screen-calculator"><rect x="1081" y="257" width="72" height="70" rx="4" fill="#fff" stroke="#c7d3ec"/><rect x="1086" y="265" width="62" height="14" rx="2" fill="#eef2fa"/><text x="1141" y="275" font-size="10" fill="#3a4e78" text-anchor="end">0</text>${Array.from({length:12},(_,i)=>`<rect x="${1086+(i%3)*21}" y="${284+Math.floor(i/3)*9}" width="18" height="6" rx="1.5" fill="${i===11?'#6b85d2':'#e0e7f5'}"/>`).join('')}</g><g id="screen-youtube"><rect x="1059" y="258" width="115" height="8" rx="2" fill="#e6eaf3"/><rect x="1063" y="260" width="10" height="5" rx="1" fill="#cf5555"/><rect x="1059" y="271" width="115" height="56" rx="2" fill="#dfebf0"/><g id="video-landscape"><circle class="video-sun" id="video-sun" cx="1149" cy="282" r="8"/><path class="video-land" d="m1059 312 28-23 23 18 28-13 36 21v12h-115Z"/><path class="video-mountain" d="m1059 319 29-9 22 9 33-17 31 19v6h-115Z"/><circle id="video-ball" cx="1081" cy="310" r="4" fill="#f5d39b"/></g><g id="video-play"><circle cx="1117" cy="298" r="12" fill="#fff" opacity=".92"/><path d="m1114 291 9 7-9 7Z" fill="#4261a4"/></g><path d="M1065 323h104" stroke="#fff" stroke-width="2"/><path id="video-progress" d="M1065 323h0" stroke="#cf5555" stroke-width="2"/></g>${editorScreen}${bootScreens}<g id="screen-loading"><rect x="1055" y="253" width="123" height="79" fill="#edf2fb"/><text class="screen-label" x="1117" y="297" text-anchor="middle">Příprava obrazu…</text></g><text class="node-label" x="1117" y="384" text-anchor="middle">Monitor</text></g>
         <g class="diagram-node" id="node-speakers" transform="${placed('speakers',1062,425)}"><rect class="node-box" x="1062" y="425" width="40" height="68" rx="6"/><rect class="node-box" x="1114" y="425" width="40" height="68" rx="6"/><g class="node-icon"><circle class="speaker-cone" cx="1082" cy="464" r="12"/><circle class="speaker-cone" cx="1134" cy="464" r="12"/><circle cx="1082" cy="440" r="4"/><circle cx="1134" cy="440" r="4"/></g><text class="node-label" x="1108" y="512" text-anchor="middle">Reproduktory</text></g>
-        <g id="power-badges" class="power-badges">${[...power.components,...power.dedicatedComponents].map(powerBadge).join('')}<g class="power-badge" data-component="mouse" transform="translate(620 688)"><title>Myš je napájená přes USB ze základní desky</title><rect x="-9" y="-12" width="18" height="24" rx="5"/><path d="M2-8-5 1h5l-2 7L6-1H1Z"/></g></g>
+        <g id="power-badges" class="power-badges">${[...power.components,...power.dedicatedComponents].map(powerBadge).join('')}<g class="power-badge" data-component="cooler" transform="translate(${cooling.x+cooling.w/2} ${cooling.y-14})"><title>Ventilátor je napájený ze základní desky</title><rect x="-9" y="-12" width="18" height="24" rx="5"/><path d="M2-8-5 1h5l-2 7L6-1H1Z"/></g><g class="power-badge" data-component="mouse" transform="translate(620 688)"><title>Myš je napájená přes USB ze základní desky</title><rect x="-9" y="-12" width="18" height="24" rx="5"/><path d="M2-8-5 1h5l-2 7L6-1H1Z"/></g></g>
         ${box('powerbutton','<title>Vypínač dá pokyn řídicím obvodům základní desky k zapnutí hlavního napájení</title><path class="power-button-icon" d="M30 12v20M17 20a20 20 0 1 0 26 0"/><text class="node-label" x="86" y="42">Vypínač</text>')}
-        <g id="cpu-software"><rect x="470" y="552" width="220" height="56" rx="7"/><text class="software-caption" x="580" y="572" text-anchor="middle">CPU vykonává</text><text id="cpu-software-name" class="software-name" x="580" y="594" text-anchor="middle"></text></g>
         <g id="active-routes"></g><g id="packets"></g><g id="flow-labels"></g>
       </svg>`;
       this.svg = container.querySelector('svg');
@@ -181,15 +187,18 @@ window.HWLab = window.HWLab || {};
       this.currentKey = '';
       this.packets = [];
       this.memoryKeys = {};
+      this.coolerRotor = this.svg.querySelector('#cooler-rotor');
     }
 
     render(state) {
-      const key = `${state.scenario.id}:${state.detailed}:${state.graphics}:${state.index}:${state.phaseIndex}`;
+      const key = `${state.scenario.id}:${state.graphics}:${state.index}:${state.phaseIndex}`;
       if (key !== this.currentKey) { this.currentKey = key; this.setStep(state); }
       this.renderMemory(state.displayMemory,state.scenario,state.graphics,state.effects);
       // effects může změnit reset i ve stejném kroku; žádný stav nezůstává z minulého scénáře.
       const e = state.effects;
       this.svg.classList.toggle('computer-off',e.powered === false);
+      const motion = coolingMotion(state);
+      this.coolerRotor.setAttribute('transform',`rotate(${motion.angle})`);
       this.svg.querySelector('#cpu-software-name').textContent = e.cpuSoftware || '';
       this.svg.querySelector('.software-caption').textContent = e.cpuSoftware === 'Čeká na start' ? 'CPU' : 'CPU vykonává';
       this.show('mouse-click', state.index === 0 && !!e.clicked);
@@ -227,13 +236,10 @@ window.HWLab = window.HWLab || {};
           // vedle čáry, aby u cíle nezakryl název komponenty.
           const position = this.packetLabelPosition(flow.route,p,label);
           const dx = position.x-p.x, dy = position.y-p.y;
-          const anchor = flow.route === 'ramCache' && p.y >= layout.nodes.cpu.y
-            ? {x:port('cpu','top')[0],y:port('cpu','top')[1]} : p;
-          const ax = anchor.x-p.x, ay = anchor.y-p.y;
           label.el.setAttribute('transform', `translate(${dx} ${dy})`);
-          leader.setAttribute('x1',ax); leader.setAttribute('y1',ay);
-          leader.setAttribute('x2',Math.max(dx-label.width/2,Math.min(ax,dx+label.width/2)));
-          leader.setAttribute('y2',Math.max(dy-label.height/2,Math.min(ay,dy+label.height/2)));
+          leader.setAttribute('x1',0); leader.setAttribute('y1',0);
+          leader.setAttribute('x2',Math.max(dx-label.width/2,Math.min(0,dx+label.width/2)));
+          leader.setAttribute('y2',Math.max(dy-label.height/2,Math.min(0,dy+label.height/2)));
         }
       });
     }
@@ -324,7 +330,11 @@ window.HWLab = window.HWLab || {};
     packetLabelPosition(routeId, point, label) {
       const {width,height} = label;
       let x = point.x, y = point.y-height/2-44;
-      if (routeId === 'mouseCpu') { x -= width/2+18; y = point.y; }
+      if (routeId === 'mouseCpu') {
+        x -= width/2+18;
+        // U zásuvky a zdroje necháme nové popisky napětí odkryté.
+        y = Math.min(point.y,layout.boundary.y+layout.boundary.h-height/2-12);
+      }
       if (routeId === 'cpuSsd') x -= width/2+14;
       if (routeId === 'uefiCpu') {
         // Čtení firmwaru vede kolem jeho pouzdra, štítek zůstane vpravo
@@ -344,8 +354,8 @@ window.HWLab = window.HWLab || {};
         // U portu RAM zůstane štítek pod pamětí, aby nezakryl její uložený obsah.
         y = Math.max(y,port('ram','bottom')[1]+height/2+12);
       }
-      if (routeId === 'ramCpu' || routeId === 'ramCache') {
-        // Při vstupu do vnitřní cache zůstane štítek před CPU; šipka pokračuje dovnitř.
+      if (routeId === 'ramCpu') {
+        // Štítek zůstává mezi pamětí a procesorem, mimo jejich uložený obsah.
         x = port('cpu','top')[0]-width/2-12;
         y = Math.max(port('ram','bottom')[1]+height/2+8,
           Math.min(port('cpu','top')[1]-height/2-8,point.y));
@@ -387,9 +397,6 @@ window.HWLab = window.HWLab || {};
     setStep(state) {
       const active = state.active;
       this.nodes.forEach(el => el.classList.toggle('active', active.includes(el.id.slice(5))));
-      const cpu = this.svg.querySelector('#node-cpu');
-      cpu.classList.toggle('cache-active', active.includes('cache'));
-      cpu.classList.toggle('registers-active', active.includes('registers'));
       const dedicated = state.graphics === 'dedicated';
       const boot = !!state.scenario.diagram?.boot;
       this.show('node-powerbutton',boot);this.show('cpu-software',boot);
@@ -407,12 +414,11 @@ window.HWLab = window.HWLab || {};
       this.show('gpu-card', dedicated); this.show('node-vram', dedicated); this.show('integrated-note', !dedicated);
       this.show('power-badge-vram', dedicated);
       this.svg.querySelector('#diagram-desc').textContent += ' Zásuvka napájí zdroj, který převádí 230 V střídavých na 12 V, 5 V a 3,3 V stejnosměrných. Zlatá vrstva a blesky souhrnně znázorňují napájení vnitřních součástí přes desku a kabely. Napětí se pro čipy dále upravuje. Monitor, reproduktory a server mají vlastní napájení mimo zobrazený zdroj. ' + (boot ? 'Před stiskem vypínače jsou hlavní výstupy zdroje vypnuté; pohotovostní napájení není samostatně zakreslené.' : 'Myš pod počítačem dostává 5 V přes USB. Napájení je přítomné během celé ukázky, i u součástí, které právě neposílají data.');
-      this.show('cpu-detail', state.detailed);
+      this.svg.querySelector('#diagram-desc').textContent += ' Dole mezi procesorem a oblastí grafiky je jednoduchý ventilátor představující aktivní chlazení počítače. Otáčení používá společný čas simulace; pauza zastaví i ventilátor.';
       const view = state.scenario.diagram || {};
       this.show('node-server', !!view.server);
-      Object.entries(connections).forEach(([id,r]) => this.show('route-' + id, (!r.detailed || state.detailed) && (!r.dedicated || dedicated) && (!r.network || view.server) && (!r.onUse || state.flows.some(f => f.route === id))));
+      Object.entries(connections).forEach(([id,r]) => this.show('route-' + id, (!r.dedicated || dedicated) && (!r.network || view.server)));
       this.show('route-mouseCpu',!boot);
-      this.svg.querySelector('#route-ramCpu').style.display = state.flows.some(f=>f.route==='ramCache') ? 'none' : '';
       const activeRoutes = this.svg.querySelector('#active-routes');
       activeRoutes.innerHTML = state.flows.map(f => {
         const d = flowPath(f);
@@ -441,5 +447,7 @@ window.HWLab = window.HWLab || {};
   Lab.connections = connections;
   Lab.layout = layout;
   Lab.power = power;
+  Lab.cooling = cooling;
+  Lab.coolingMotion = coolingMotion;
   Lab.transferProgress = transferProgress;
 })(window.HWLab);

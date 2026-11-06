@@ -17,17 +17,18 @@
   <main class="workspace">
     <section class="settings" aria-label="Nastavení průvodce">
       <fieldset class="scenario-picker"><legend>Vyberte činnost</legend><div id="scenario-options"></div></fieldset>
-      <div class="detail-picker">
-        <label class="setting-toggle"><input type="checkbox" role="switch" id="show-cpu-detail" aria-controls="cpu-detail"><span class="switch" aria-hidden="true"></span><span>Cache a registry</span></label>
-      </div>
-      <div class="graphics-picker">
-        <label class="setting-toggle" title="Vypnuto: integrovaná grafika. Zapnuto: dedikovaná grafika."><input type="checkbox" role="switch" id="dedicated-graphics" aria-label="Dedikovaná grafika" aria-controls="gpu-card node-vram"><span class="switch" aria-hidden="true"></span><span>Dedikovaná grafika</span></label>
-      </div>
     </section>
 
     <section class="lab" aria-labelledby="scenario-title">
       <div class="lab-heading">
-        <h1 id="scenario-title">Spuštění kalkulačky</h1>
+        <div class="scenario-heading">
+          <h1 id="scenario-title">Spuštění kalkulačky</h1>
+          <fieldset class="graphics-picker">
+            <legend class="visually-hidden">Typ grafiky</legend>
+            <label class="graphics-choice" title="Grafika sdílí systémovou paměť RAM"><input type="radio" name="graphics" id="integrated-graphics" value="integrated" aria-controls="diagram-container" checked><span>Integrovaná</span></label>
+            <label class="graphics-choice" title="Grafická karta používá vlastní paměť VRAM"><input type="radio" name="graphics" id="dedicated-graphics" value="dedicated" aria-controls="diagram-container"><span>Dedikovaná</span></label>
+          </fieldset>
+        </div>
         <div class="playback-controls" role="group" aria-label="Ovládání animace">
           <button class="play-button" id="play" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg><span>Spustit</span></button>
           <button class="control-button" id="next" type="button" title="Přehrát jeden krok a zastavit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 5 10 7-10 7ZM19 5v14"/></svg><span>Další krok</span></button>
